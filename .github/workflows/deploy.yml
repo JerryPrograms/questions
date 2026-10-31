@@ -129,6 +129,7 @@ jobs:
           set net:max-retries 2
           set net:timeout 20
           set sftp:connect-program "ssh -a -x -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts"
+          set cmd:fail-exit no
           mkdir -p storage/app/private
           mkdir -p storage/app/public
           mkdir -p storage/framework/cache/data
@@ -136,6 +137,7 @@ jobs:
           mkdir -p storage/framework/sessions
           mkdir -p storage/framework/views
           mkdir -p storage/logs
+          set cmd:fail-exit yes
           mirror --reverse --verbose --parallel=4 \
             --exclude-glob .env \
             --exclude-glob 'storage/**' \
