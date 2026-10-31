@@ -112,7 +112,7 @@ jobs:
       - name: Install SFTP client
         run: |
           sudo apt-get update
-          sudo apt-get install --yes lftp sshpass
+          sudo apt-get install --yes lftp
 
       - name: Configure server identity
         run: |
@@ -146,33 +146,3 @@ jobs:
             release/ ./
           bye
           LFTP
-
-      - name: Run database migrations
-        run: |
-          SSHPASS="$SFTP_PASSWORD" sshpass -e ssh \
-            -p "$SFTP_PORT" \
-            -o StrictHostKeyChecking=yes \
-            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
-            "$SFTP_USERNAME@$SFTP_HOST" '
-              set -eu
-
-              if [ -f "$HOME/questions/artisan" ]; then
-                cd "$HOME/questions"
-              elif [ -f "$HOME/artisan" ]; then
-                cd "$HOME"
-              else
-                echo "Laravel application directory not found." >&2
-                exit 1
-              fi
-
-              if [ -x /usr/bin/php8.4 ]; then
-                php_binary=/usr/bin/php8.4
-              elif [ -x /usr/bin/php8.4-cli ]; then
-                php_binary=/usr/bin/php8.4-cli
-              else
-                echo "PHP 8.4 CLI is unavailable." >&2
-                exit 1
-              fi
-
-              "$php_binary" artisan migrate --force --no-interaction
-            '
