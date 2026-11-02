@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Support\AuditLog;
 use Brick\Math\BigDecimal;
 use Brick\Math\RoundingMode;
 use DateTimeImmutable;
@@ -10,6 +11,8 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\Cell\DataType;
@@ -37,6 +40,195 @@ class ImportController extends Controller
     public function index(): View
     {
         return view('admin.imports.index');
+    }
+
+    public function apiIndex(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'per_page' => ['nullable', 'integer', 'between:1,100'],
+            'search' => ['nullable', 'string', 'max:255'],
+        ]);
+        $query = DB::table('imports')
+            ->select('id', 'uploaded_by', 'file_name', 'sha256', 'row_count', 'created_at', 'updated_at')
+            ->orderByDesc('id');
+
+        if (! empty($data['search'])) {
+            $query->where('file_name', 'like', '%'.$data['search'].'%');
+        }
+
+        return response()->json($query->paginate($data['per_page'] ?? 25));
+    }
+
+    public function apiAllData(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'import_id' => ['nullable', 'integer', Rule::exists('imports', 'id')],
+            'location' => ['nullable', 'string', 'max:255'],
+            'txn_id' => ['nullable', 'string', 'max:255'],
+            'answered' => ['nullable', 'boolean'],
+            'search' => ['nullable', 'string', 'max:255'],
+            'per_page' => ['nullable', 'integer', 'between:1,100'],
+        ]);
+        $query = DB::table('accounting_entries')
+            ->join('imports', 'imports.id', '=', 'accounting_entries.import_id')
+            ->leftJoin('users as answering_users', 'answering_users.id', '=', 'accounting_entries.answered_by')
+            ->select(
+                'accounting_entries.*',
+                'imports.file_name as import_file_name',
+                'imports.sha256 as import_sha256',
+                'imports.uploaded_by as import_uploaded_by',
+                'imports.created_at as imported_at',
+                'answering_users.name as answered_by_name',
+                'answering_users.email as answered_by_email',
+            )
+            ->orderByDesc('accounting_entries.id');
+
+        foreach (['import_id', 'location', 'txn_id'] as $filter) {
+            if (isset($data[$filter]) && $data[$filter] !== '') {
+                $query->where('accounting_entries.'.$filter, $data[$filter]);
+            }
+        }
+
+        if (array_key_exists('answered', $data)) {
+            $data['answered']
+                ? $query->whereNotNull('accounting_entries.answered_at')
+                : $query->whereNull('accounting_entries.answered_at');
+        }
+
+        if (! empty($data['search'])) {
+            $query->where(function ($query) use ($data): void {
+                foreach (['txn_id', 'location', 'bank_name', 'check_no', 'paid_to_by', 'account', 'description', 'answer'] as $column) {
+                    $query->orWhere('accounting_entries.'.$column, 'like', '%'.$data['search'].'%');
+                }
+                $query->orWhere('imports.file_name', 'like', '%'.$data['search'].'%');
+            });
+        }
+
+        return response()->json($query->paginate($data['per_page'] ?? 25));
+    }
+
+    public function apiStore(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'import_key' => ['required', 'string', 'max:255'],
+            'file_name' => ['nullable', 'string', 'max:255'],
+            'rows' => ['required', 'array', 'min:1', 'max:20000'],
+            'rows.*.txn_id' => ['required', 'string', 'distinct', 'max:255'],
+            'rows.*.location' => ['required', 'string', 'max:255'],
+            'rows.*.bank_name' => ['required', 'string', 'max:255'],
+            'rows.*.transaction_date' => ['required', 'string'],
+            'rows.*.check_no' => ['nullable', 'string', 'max:255'],
+            'rows.*.paid_to_by' => ['required', 'string', 'max:255'],
+            'rows.*.account' => ['required', 'string', 'max:255'],
+            'rows.*.credit' => ['nullable', 'numeric', 'min:0'],
+            'rows.*.debit' => ['nullable', 'numeric', 'min:0'],
+            'rows.*.description' => ['required', 'string', 'max:10000'],
+            'rows.*.class_name' => ['required', 'string', 'max:255'],
+            'rows.*.sheet_name' => ['nullable', 'string', 'max:255'],
+        ]);
+        $rows = [];
+
+        foreach ($data['rows'] as $index => $row) {
+            $label = 'Row '.($index + 1);
+            $credit = $this->amount(isset($row['credit']) ? (string) $row['credit'] : '', $label, 'credit');
+            $debit = $this->amount(isset($row['debit']) ? (string) $row['debit'] : '', $label, 'debit');
+
+            if (($credit === null) === ($debit === null)) {
+                throw ValidationException::withMessages(["rows.{$index}" => 'Enter either credit or debit.']);
+            }
+
+            $rows[] = [
+                'sheet_name' => $row['sheet_name'] ?? 'API',
+                'row_number' => $index + 1,
+                'txn_id' => $row['txn_id'],
+                'location' => $row['location'],
+                'bank_name' => $row['bank_name'],
+                'transaction_date' => $this->date($row['transaction_date'], $label),
+                'check_no' => $row['check_no'] ?? null,
+                'paid_to_by' => $row['paid_to_by'],
+                'account' => $row['account'],
+                'credit' => $credit,
+                'debit' => $debit,
+                'description' => $row['description'],
+                'class_name' => $row['class_name'],
+            ];
+        }
+
+        [$importId, $created] = $this->upsertImport(
+            $request,
+            $data['file_name'] ?? $data['import_key'],
+            hash('sha256', 'api:'.$data['import_key']),
+            $rows,
+        );
+
+        return response()->json([
+            'data' => DB::table('imports')->find($importId),
+            'created' => $created,
+            'message' => count($rows).' rows imported.',
+        ], $created ? 201 : 200);
+    }
+
+    public function apiShow(int $import): JsonResponse
+    {
+        $uploadedFile = DB::table('imports')->find($import);
+        abort_if($uploadedFile === null, 404);
+
+        return response()->json(['data' => $uploadedFile]);
+    }
+
+    public function apiEntries(Request $request, int $import): JsonResponse
+    {
+        abort_unless(DB::table('imports')->where('id', $import)->exists(), 404);
+        $data = $request->validate(['per_page' => ['nullable', 'integer', 'between:1,100']]);
+
+        return response()->json(
+            DB::table('accounting_entries')
+                ->where('import_id', $import)
+                ->orderBy('sheet_name')
+                ->orderBy('row_number')
+                ->paginate($data['per_page'] ?? 25),
+        );
+    }
+
+    public function apiUpdate(Request $request, int $import): JsonResponse
+    {
+        $uploadedFile = DB::table('imports')->find($import);
+        abort_if($uploadedFile === null, 404);
+        $data = $request->validate(['file_name' => ['required', 'string', 'max:255']]);
+
+        DB::table('imports')->where('id', $import)->update([
+            'file_name' => $data['file_name'],
+            'updated_at' => now(),
+        ]);
+        AuditLog::record($request, 'import.updated', 'Renamed an imported file.', 'import', $import, null, [
+            'file_name' => $uploadedFile->file_name,
+        ], [
+            'file_name' => $data['file_name'],
+        ]);
+
+        return response()->json(['data' => DB::table('imports')->find($import)]);
+    }
+
+    public function apiDestroy(Request $request, int $import): JsonResponse
+    {
+        $uploadedFile = DB::table('imports')->find($import);
+        abort_if($uploadedFile === null, 404);
+        $detailFiles = DB::table('accounting_entries')
+            ->where('import_id', $import)
+            ->whereNotNull('detail_file_path')
+            ->pluck('detail_file_path')
+            ->all();
+
+        DB::transaction(function () use ($import, $request, $uploadedFile): void {
+            DB::table('imports')->where('id', $import)->delete();
+            AuditLog::record($request, 'import.deleted', 'Deleted '.$uploadedFile->file_name.' and its imported rows.', 'import', $import, null, [
+                'file_name' => $uploadedFile->file_name,
+                'row_count' => $uploadedFile->row_count,
+            ]);
+        });
+        Storage::disk('local')->delete($detailFiles);
+
+        return response()->json(status: 204);
     }
 
     public function indexData(Request $request): JsonResponse
@@ -124,7 +316,7 @@ class ImportController extends Controller
         ]);
     }
 
-    public function export(int $import): BinaryFileResponse
+    public function export(Request $request, int $import): BinaryFileResponse
     {
         $uploadedFile = DB::table('imports')->find($import);
         abort_if($uploadedFile === null, 404);
@@ -150,10 +342,19 @@ class ImportController extends Controller
 
         $downloadName = pathinfo($uploadedFile->file_name, PATHINFO_FILENAME).'-export.'.$extension;
 
-        return $this->downloadExport($spreadsheet, $extension, $downloadName);
+        $response = $this->downloadExport($spreadsheet, $extension, $downloadName);
+        DB::table('accounting_entries')
+            ->whereIn('id', $entries->whereNotNull('answered_at')->pluck('id'))
+            ->update(['answer_exported_at' => now()]);
+        AuditLog::record($request, 'import.exported', 'Exported '.$uploadedFile->file_name.' with '.$entries->count().' rows.', 'import', $import, null, null, [
+            'file_name' => $downloadName,
+            'row_count' => $entries->count(),
+        ]);
+
+        return $response;
     }
 
-    public function exportAnswered(): BinaryFileResponse
+    public function exportAnswered(Request $request): BinaryFileResponse
     {
         $entries = DB::table('accounting_entries')
             ->leftJoin('users as answering_users', 'answering_users.id', '=', 'accounting_entries.answered_by')
@@ -168,7 +369,16 @@ class ImportController extends Controller
         $sheet->setTitle('Answered');
         $this->writeExport($sheet, $entries, false);
 
-        return $this->downloadExport($spreadsheet, 'xlsx', 'answered-questions.xlsx');
+        $response = $this->downloadExport($spreadsheet, 'xlsx', 'answered-questions.xlsx');
+        DB::table('accounting_entries')
+            ->whereIn('id', $entries->pluck('id'))
+            ->update(['answer_exported_at' => now()]);
+        AuditLog::record($request, 'question.answers_exported', 'Exported '.$entries->count().' answered questions.', 'question_export', null, null, null, [
+            'file_name' => 'answered-questions.xlsx',
+            'row_count' => $entries->count(),
+        ]);
+
+        return $response;
     }
 
     public function store(Request $request): JsonResponse|RedirectResponse
@@ -178,10 +388,6 @@ class ImportController extends Controller
         $file = $request->file('file');
         $path = $file->getPathname();
         $hash = hash_file('sha256', $path);
-
-        if (DB::table('imports')->where('sha256', $hash)->exists()) {
-            throw ValidationException::withMessages(['file' => 'This file has already been imported.']);
-        }
 
         $isExcel = strtolower($file->getClientOriginalExtension()) === 'xlsx';
 
@@ -227,17 +433,22 @@ class ImportController extends Controller
         $rows = [];
 
         foreach ($spreadsheet->getWorksheetIterator() as $sheet) {
+            $highestColumn = $sheet->getHighestDataColumn();
+            $hasTxnId = $highestColumn === 'K';
+            $columns = range('A', $hasTxnId ? 'K' : 'J');
             $headers = [];
-            foreach (range('A', 'J') as $column) {
+            foreach ($columns as $column) {
                 $headers[] = strtoupper(trim(ltrim((string) $sheet->getCell($column.'1')->getValue(), "\xEF\xBB\xBF")));
             }
-            if ($headers !== self::HEADERS || $sheet->getHighestDataColumn() !== 'J') {
-                throw ValidationException::withMessages(['file' => "Sheet {$sheet->getTitle()} must contain the ten sample columns, in the same order."]);
+            $validTxnIdHeader = ! $hasTxnId || in_array($headers[10], ['TXNID', 'TXN ID'], true);
+
+            if (array_slice($headers, 0, 10) !== self::HEADERS || ! in_array($highestColumn, ['J', 'K'], true) || ! $validTxnIdHeader) {
+                throw ValidationException::withMessages(['file' => "Sheet {$sheet->getTitle()} must contain the sample columns in order, with TXNID as the optional eleventh column."]);
             }
 
             for ($rowNumber = 2; $rowNumber <= $sheet->getHighestDataRow(); $rowNumber++) {
                 $values = [];
-                foreach (range('A', 'J') as $column) {
+                foreach ($columns as $column) {
                     $cell = $sheet->getCell($column.$rowNumber);
                     if ($cell->isFormula()) {
                         throw ValidationException::withMessages(['file' => "Sheet {$sheet->getTitle()}, row {$rowNumber}: formulas are not supported."]);
@@ -259,6 +470,7 @@ class ImportController extends Controller
                 $rows[] = [
                     'sheet_name' => $sheet->getTitle(),
                     'row_number' => $rowNumber,
+                    'txn_id' => ! $hasTxnId || $values[10] === '' ? null : $this->requiredText($values[10], $label, 'transaction ID'),
                     'location' => $this->requiredText($values[0], $label, 'location'),
                     'bank_name' => $this->requiredText($values[1], $label, 'bank name'),
                     'transaction_date' => $this->date($values[2], $label),
@@ -282,33 +494,66 @@ class ImportController extends Controller
             throw ValidationException::withMessages(['file' => 'The file contains no data rows.']);
         }
 
-        $importId = DB::transaction(function () use ($request, $file, $hash, $rows): int {
-            $now = now();
-            $importId = DB::table('imports')->insertGetId([
-                'uploaded_by' => $request->user()->id,
-                'file_name' => mb_substr($file->getClientOriginalName(), 0, 255),
-                'sha256' => $hash,
-                'row_count' => count($rows),
-                'created_at' => $now,
-                'updated_at' => $now,
-            ]);
-
-            foreach (array_chunk($rows, 500) as $chunk) {
-                DB::table('accounting_entries')->insert(array_map(
-                    fn (array $row): array => $row + ['import_id' => $importId, 'created_at' => $now, 'updated_at' => $now],
-                    $chunk,
-                ));
-            }
-
-            return $importId;
-        });
+        [$importId, $created] = $this->upsertImport($request, $file->getClientOriginalName(), $hash, $rows);
 
         $message = count($rows).' rows imported.';
+
         $request->session()->flash('status', $message);
 
         return $request->expectsJson()
             ? response()->json(['redirect' => route('admin.imports.show', $importId), 'message' => $message])
             : redirect()->route('admin.imports.show', $importId)->with('status', $message);
+    }
+
+    /**
+     * @param  list<array<string, int|string|null>>  $rows
+     * @return array{0: int, 1: bool}
+     */
+    private function upsertImport(Request $request, string $fileName, string $hash, array $rows): array
+    {
+        $created = ! DB::table('imports')->where('sha256', $hash)->exists();
+        $fileName = mb_substr($fileName, 0, 255);
+        $importId = DB::transaction(function () use ($request, $fileName, $hash, $rows, $created): int {
+            $now = now();
+            DB::table('imports')->upsert([[
+                'uploaded_by' => $request->user()->id,
+                'file_name' => $fileName,
+                'sha256' => $hash,
+                'row_count' => count($rows),
+                'created_at' => $now,
+                'updated_at' => $now,
+            ]], ['sha256'], ['uploaded_by', 'file_name', 'row_count', 'updated_at']);
+            $importId = (int) DB::table('imports')->where('sha256', $hash)->value('id');
+
+            foreach (array_chunk($rows, 500) as $chunk) {
+                DB::table('accounting_entries')->upsert(array_map(
+                    fn (array $row): array => $row + ['import_id' => $importId, 'created_at' => $now, 'updated_at' => $now],
+                    $chunk,
+                ), ['import_id', 'sheet_name', 'row_number'], [
+                    'location',
+                    'bank_name',
+                    'transaction_date',
+                    'check_no',
+                    'paid_to_by',
+                    'account',
+                    'credit',
+                    'debit',
+                    'description',
+                    'class_name',
+                    'txn_id',
+                    'updated_at',
+                ]);
+            }
+            AuditLog::record($request, $created ? 'import.created' : 'import.upserted', ($created ? 'Imported ' : 'Re-imported ').$fileName.' with '.count($rows).' rows.', 'import', $importId, null, null, [
+                'file_name' => $fileName,
+                'row_count' => count($rows),
+                'locations' => array_values(array_unique(array_column($rows, 'location'))),
+            ]);
+
+            return $importId;
+        });
+
+        return [$importId, $created];
     }
 
     private function requiredText(string $value, string $label, string $field, int $maxLength = 255): string
@@ -364,7 +609,7 @@ class ImportController extends Controller
     /** @param iterable<int, object> $entries */
     private function writeExport(Worksheet $sheet, iterable $entries, bool $isCsv): void
     {
-        $this->writeExportRow($sheet, 1, [...self::HEADERS, 'ANSWER', 'ANSWERED BY', 'ANSWERED AT', 'ARCHIVED AT'], $isCsv);
+        $this->writeExportRow($sheet, 1, [...self::HEADERS, 'TXNID', 'ANSWER', 'ANSWERED BY', 'ANSWERED AT', 'ARCHIVED AT'], $isCsv);
 
         $row = 2;
         foreach ($entries as $entry) {
@@ -380,6 +625,7 @@ class ImportController extends Controller
                 $entry->debit,
                 $entry->description,
                 $entry->class_name,
+                $entry->txn_id,
                 $answer,
                 $entry->answered_by_name,
                 $entry->answered_at,
@@ -387,7 +633,7 @@ class ImportController extends Controller
             ], $isCsv);
 
             if (! $isCsv && $entry->answer !== null) {
-                $sheet->getStyle('K'.$row)->getAlignment()->setWrapText(true);
+                $sheet->getStyle('L'.$row)->getAlignment()->setWrapText(true);
                 $sheet->getRowDimension($row)->setRowHeight(-1);
             }
 

@@ -1,9 +1,11 @@
 <?php
 
+use App\Http\Controllers\AuditLogController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\ImportController;
 use App\Http\Controllers\ManagerController;
 use App\Http\Controllers\QuestionController;
+use App\Http\Controllers\QuestionOptionController;
 use Illuminate\Support\Facades\Route;
 
 Route::redirect('/', '/login');
@@ -11,6 +13,9 @@ Route::redirect('/', '/login');
 Route::middleware('guest')->group(function (): void {
     Route::get('/login', [AuthController::class, 'showLogin'])->name('login');
     Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:5,1');
+    Route::get('/login/verify', [AuthController::class, 'showVerification'])->name('login.verify');
+    Route::post('/login/verify', [AuthController::class, 'verify'])->middleware('throttle:6,1')->name('login.verify.submit');
+    Route::post('/login/verify/resend', [AuthController::class, 'resend'])->middleware('throttle:3,1')->name('login.verify.resend');
 });
 
 Route::middleware('auth')->group(function (): void {
@@ -26,6 +31,7 @@ Route::middleware('auth')->group(function (): void {
 
     Route::middleware('can:admin')->group(function (): void {
         Route::get('/admin', [ManagerController::class, 'index'])->name('admin.dashboard');
+        Route::get('/admin/logs', [AuditLogController::class, 'index'])->name('admin.audit-logs.index');
         Route::get('/admin/dashboard/data', [ManagerController::class, 'dashboardData'])->name('admin.dashboard.data');
         Route::post('/admin/managers', [ManagerController::class, 'store'])->name('admin.managers.store');
         Route::get('/admin/manager-locations', [ManagerController::class, 'locations'])->name('admin.manager-locations.index');
@@ -40,9 +46,15 @@ Route::middleware('auth')->group(function (): void {
         Route::get('/admin/imports/{import}', [ImportController::class, 'show'])->whereNumber('import')->name('admin.imports.show');
         Route::redirect('/admin/uploaded-data', '/admin/imports');
         Route::get('/admin/questions', [QuestionController::class, 'index'])->name('admin.questions.index');
+        Route::get('/admin/question-options', [QuestionOptionController::class, 'index'])->name('admin.question-options.index');
+        Route::post('/admin/question-options', [QuestionOptionController::class, 'store'])->name('admin.question-options.store');
+        Route::patch('/admin/question-options/{option}', [QuestionOptionController::class, 'update'])->whereNumber('option')->name('admin.question-options.update');
+        Route::delete('/admin/question-options/{option}', [QuestionOptionController::class, 'destroy'])->whereNumber('option')->name('admin.question-options.destroy');
         Route::get('/admin/questions/data', [QuestionController::class, 'data'])->name('admin.questions.data');
         Route::get('/admin/questions/export-answered', [ImportController::class, 'exportAnswered'])->name('admin.questions.export-answered');
         Route::post('/admin/questions/bulk-answer', [QuestionController::class, 'bulkAnswer'])->name('admin.questions.bulk-answer');
+        Route::post('/admin/questions/{entry}/account', [QuestionController::class, 'updateAccount'])->whereNumber('entry')->name('admin.questions.account');
+        Route::post('/admin/questions/{entry}/paid-to-by', [QuestionController::class, 'updatePaidToBy'])->whereNumber('entry')->name('admin.questions.paid-to-by');
         Route::post('/admin/questions/{entry}/answer', [QuestionController::class, 'answer'])->whereNumber('entry')->name('admin.questions.answer');
         Route::post('/admin/questions/{entry}/detail', [QuestionController::class, 'uploadDetail'])->whereNumber('entry')->name('admin.questions.detail');
         Route::get('/admin/questions/{entry}/detail', [QuestionController::class, 'viewDetail'])->whereNumber('entry')->name('admin.questions.detail.view');
@@ -56,6 +68,9 @@ Route::middleware('auth')->group(function (): void {
         Route::get('/manager/dashboard/data', [ManagerController::class, 'dashboardData'])->name('manager.dashboard.data');
         Route::get('/manager/questions', [QuestionController::class, 'index'])->name('manager.questions.index');
         Route::get('/manager/questions/data', [QuestionController::class, 'data'])->name('manager.questions.data');
+        Route::post('/manager/questions/bulk-answer', [QuestionController::class, 'bulkAnswer'])->name('manager.questions.bulk-answer');
+        Route::post('/manager/questions/{entry}/account', [QuestionController::class, 'updateAccount'])->whereNumber('entry')->name('manager.questions.account');
+        Route::post('/manager/questions/{entry}/paid-to-by', [QuestionController::class, 'updatePaidToBy'])->whereNumber('entry')->name('manager.questions.paid-to-by');
         Route::post('/manager/questions/{entry}/answer', [QuestionController::class, 'answer'])->whereNumber('entry')->name('manager.questions.answer');
         Route::get('/manager/questions/{entry}/detail', [QuestionController::class, 'viewDetail'])->whereNumber('entry')->name('manager.questions.detail.view');
     });

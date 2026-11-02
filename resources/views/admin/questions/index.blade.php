@@ -16,6 +16,20 @@
             <button type="button" data-question-filter="pending" class="active" aria-pressed="true">Pending</button>
             @if($isAdmin)<button type="button" data-question-filter="archived" aria-pressed="false">Archived</button>@endif
         </div>
+        <div class="question-status-legend" data-question-status-legend hidden aria-label="Question status legend">
+            <span><i class="answered" aria-hidden="true"></i>Answered</span>
+            <span><i class="pending" aria-hidden="true"></i>Pending</span>
+            <span><i class="archived" aria-hidden="true"></i>Archived</span>
+        </div>
+        <form class="bulk-answer-form" method="POST" action="{{ route($isAdmin ? 'admin.questions.bulk-answer' : 'manager.questions.bulk-answer') }}" data-bulk-answer-form hidden>
+            @csrf
+            @if($allLocations)<input type="hidden" name="all" value="1">@else @foreach($locations as $location)<input type="hidden" name="locations[]" value="{{ $location }}">@endforeach @endif
+            <label class="sr-only" for="bulk-answer">Answer selected questions</label>
+            <input id="bulk-answer" type="text" name="answer" maxlength="10000" autocomplete="off" placeholder="Answer selected questions" required>
+            <button class="button button-primary" type="submit">Apply to selected</button>
+            <span class="form-error" data-form-error role="alert"></span>
+            <span class="bulk-success" data-bulk-success role="status"></span>
+        </form>
         @if($isAdmin)
         <section class="archive-actions-panel">
             <form method="POST" action="{{ route('admin.questions.bulk-archive') }}" data-bulk-archive-form>
@@ -30,8 +44,9 @@
         @endif
     </div>
     <section class="panel data-panel data-table-panel">
-        <div class="table-scroll"><table class="data-table display" data-server-table="questions" data-status="pending" data-url="{{ route($isAdmin ? 'admin.questions.data' : 'manager.questions.data', $selection) }}" data-answer-url="{{ route($isAdmin ? 'admin.questions.answer' : 'manager.questions.answer', '__id__') }}" @if($isAdmin)data-detail-url="{{ route('admin.questions.detail', '__id__') }}"@endif data-detail-view-url="{{ route($isAdmin ? 'admin.questions.detail.view' : 'manager.questions.detail.view', '__id__') }}" @if($isAdmin)data-archive-url="{{ route('admin.questions.archive', '__id__') }}" data-status-url="{{ route('admin.questions.status', '__id__') }}"@endif data-csrf="{{ csrf_token() }}"><thead><tr><th><span class="sr-only">Select</span><input type="checkbox" data-select-page aria-label="Select all questions on this page"></th><th>Location</th><th>Amount</th><th>Credit/Debit</th><th>Paid to/by</th><th>Account</th><th>Detail</th><th>Status</th><th>Answer</th><th>Actions</th></tr></thead><tbody></tbody></table></div>
+        <div class="table-scroll"><table class="data-table display" data-server-table="questions" data-status="pending" data-url="{{ route($isAdmin ? 'admin.questions.data' : 'manager.questions.data', $selection) }}" data-answer-url="{{ route($isAdmin ? 'admin.questions.answer' : 'manager.questions.answer', '__id__') }}" data-account-url="{{ route($isAdmin ? 'admin.questions.account' : 'manager.questions.account', '__id__') }}" data-paid-to-by-url="{{ route($isAdmin ? 'admin.questions.paid-to-by' : 'manager.questions.paid-to-by', '__id__') }}" @if($isAdmin)data-detail-url="{{ route('admin.questions.detail', '__id__') }}"@endif data-detail-view-url="{{ route($isAdmin ? 'admin.questions.detail.view' : 'manager.questions.detail.view', '__id__') }}" @if($isAdmin)data-archive-url="{{ route('admin.questions.archive', '__id__') }}" data-status-url="{{ route('admin.questions.status', '__id__') }}"@endif data-csrf="{{ csrf_token() }}"><thead><tr><th><span class="sr-only">Select</span><input type="checkbox" data-select-page aria-label="Select all questions on this page"></th><th>Location</th><th>Amount</th><th>Credit/Debit</th><th>Paid to/by</th><th>Account</th><th>Detail</th><th>Status</th><th>Answer</th><th>Actions</th></tr></thead><tbody></tbody></table></div>
     </section>
+    <script type="application/json" data-question-options>@json($questionOptions, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT)</script>
     <div class="modal fade answer-history-modal" id="answer-history-modal" tabindex="-1" aria-labelledby="answer-history-title" aria-hidden="true" data-answer-history-modal>
         <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
             <div class="modal-content">

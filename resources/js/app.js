@@ -2,10 +2,42 @@ import DataTable from 'datatables.net-bs5';
 import 'datatables.net-bs5/css/dataTables.bootstrap5.css';
 import 'bootstrap';
 import $ from 'jquery';
+import select2 from 'select2';
+import 'select2/dist/css/select2.min.css';
 import jqueryConfirm from 'jquery-confirm';
 import 'jquery-confirm/dist/jquery-confirm.min.css';
 
+select2(window, $);
 jqueryConfirm(window, $);
+$('[data-audit-filter-select]').each(function () {
+    $(this).select2({
+        allowClear: true,
+        minimumResultsForSearch: 0,
+        placeholder: this.options[0]?.text,
+        width: '100%',
+    });
+});
+const confirmFormSubmit = (message) => new Promise((resolve) => {
+    $.confirm({
+        title: 'Delete option',
+        content: message,
+        type: 'red',
+        animation: 'scale',
+        closeAnimation: 'scale',
+        draggable: false,
+        escapeKey: 'cancel',
+        buttons: {
+            delete: {
+                text: 'Delete',
+                btnClass: 'btn-red',
+                action: () => resolve(true),
+            },
+            cancel: {
+                action: () => resolve(false),
+            },
+        },
+    });
+});
 
 document.addEventListener('submit', async (event) => {
     const form = event.target;
@@ -15,6 +47,10 @@ document.addEventListener('submit', async (event) => {
     }
 
     event.preventDefault();
+
+    if (form.dataset.confirm && ! await confirmFormSubmit(form.dataset.confirm)) {
+        return;
+    }
 
     const button = event.submitter ?? form.querySelector('button[type="submit"]');
 
@@ -69,9 +105,39 @@ document.addEventListener('submit', async (event) => {
 
 const textRenderer = DataTable.render.text();
 const numberRenderer = DataTable.render.number(null, null, 2);
+const showDialogError = (message) => $.alert({
+    title: 'Unable to complete action',
+    content: message,
+    type: 'red',
+    animation: 'scale',
+    closeAnimation: 'scale',
+    draggable: false,
+});
+const confirmArchive = (message) => new Promise((resolve) => {
+    $.confirm({
+        title: 'Unexported answer',
+        content: message,
+        type: 'orange',
+        animation: 'scale',
+        closeAnimation: 'scale',
+        draggable: false,
+        escapeKey: 'cancel',
+        buttons: {
+            archive: {
+                text: 'Archive anyway',
+                btnClass: 'btn-orange',
+                action: () => resolve(true),
+            },
+            cancel: {
+                action: () => resolve(false),
+            },
+        },
+    });
+});
 
 document.querySelectorAll('[data-server-table]').forEach((table) => {
     const tableType = table.dataset.serverTable;
+    const questionOptions = JSON.parse(document.querySelector('[data-question-options]')?.textContent ?? '{}');
     const selectedQuestionIds = new Set();
     const selectedLocationNames = new Set();
     const answerHistories = new Map();
@@ -109,12 +175,30 @@ document.querySelectorAll('[data-server-table]').forEach((table) => {
             },
         ];
     } else if (tableType === 'questions') {
+        const renderQuestionOption = (value, type, row, field, label) => {
+            if (type !== 'display' || row.archived_at !== null) {
+                return type === 'display' ? textRenderer.display(value) : value;
+            }
+
+            const names = questionOptions[field]?.[row.location] ?? [];
+            const optionNames = names.includes(value) ? names : [value, ...names];
+            const action = (field === 'account' ? table.dataset.accountUrl : table.dataset.paidToByUrl).replace('__id__', encodeURIComponent(row.id));
+            const encodedValue = textRenderer.display(value);
+            const options = optionNames
+                .map((name) => `<option value="${textRenderer.display(name)}"${name === value ? ' selected' : ''}>${textRenderer.display(name)}</option>`)
+                .join('');
+
+            return `<div class="question-option-picker"><label class="sr-only" for="${field}-${Number(row.id)}">${label}</label><select id="${field}-${Number(row.id)}" required data-question-option-select data-field="${field}" data-original-value="${encodedValue}" data-url="${action}">${options}</select><span data-question-option-status role="status"></span></div>`;
+        };
+
         columns = [
             {
                 data: 'id',
                 orderable: false,
                 searchable: false,
-                render: (id) => `<input type="checkbox" data-question-select value="${Number(id)}" aria-label="Select question">`,
+                render: (id, type, row) => row.archived_at === null
+                    ? `<input type="checkbox" data-question-select value="${Number(id)}" aria-label="Select question">`
+                    : '<input type="checkbox" disabled aria-label="Archived question cannot be selected">',
             },
             {
                 data: null,
@@ -123,14 +207,17 @@ document.querySelectorAll('[data-server-table]').forEach((table) => {
                         return [row.location, row.transaction_date, row.bank_name, row.check_no, row.description].filter((value) => value !== null).join(' ');
                     }
 
-                    const cheque = row.check_no === null ? '' : `<span>Cheque #${textRenderer.display(row.check_no)}</span>`;
-                    return `<div class="transaction-summary"><strong>${textRenderer.display(row.transaction_date)}</strong><span>${textRenderer.display(row.bank_name)}</span>${cheque}<p>${textRenderer.display(row.description)}</p></div>`;
+                    const cheque = row.check_no === null ? '' : ` · Cheque #${textRenderer.display(row.check_no)}`;
+                    return `<div class="transaction-summary"><strong>${textRenderer.display(row.transaction_date)}</strong><span>${textRenderer.display(row.bank_name)}${cheque}</span></div>`;
                 },
             },
             { data: 'amount', render: (value) => value === null ? '—' : numberRenderer.display(value) },
             { data: 'credit_debit', render: textRenderer },
-            { data: 'paid_to_by', render: textRenderer },
-            { data: 'account', render: textRenderer },
+            { data: 'paid_to_by', render: (value, type, row) => renderQuestionOption(value, type, row, 'paid_to_by', 'Paid to/by') },
+            {
+                data: 'account',
+                render: (value, type, row) => renderQuestionOption(value, type, row, 'account', 'Account'),
+            },
             {
                 data: null,
                 orderable: false,
@@ -141,11 +228,14 @@ document.querySelectorAll('[data-server-table]').forEach((table) => {
                     }
 
                     const viewAction = table.dataset.detailViewUrl.replace('__id__', encodeURIComponent(row.id));
-                    const hidden = row.detail_file_path === null ? ' hidden' : '';
-                    const viewButton = `<a class="button detail-view-button detail-action-button" href="${viewAction}" data-bs-toggle="modal" data-bs-target="#detail-preview-modal" data-detail-location="${textRenderer.display(row.location)}" data-detail-amount="${row.amount === null ? '—' : numberRenderer.display(row.amount)}" data-detail-view${hidden} aria-label="View detail" title="View detail"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></a>`;
+                    const viewAttributes = row.detail_file_path === null
+                        ? 'aria-disabled="true" title="No detail file uploaded"'
+                        : `href="${viewAction}" data-bs-toggle="modal" data-bs-target="#detail-preview-modal" title="View detail"`;
+                    const viewLabel = row.detail_file_path === null ? 'No detail file uploaded' : 'View detail';
+                    const viewButton = `<a class="button detail-view-button detail-action-button" ${viewAttributes} data-detail-url="${viewAction}" data-detail-location="${textRenderer.display(row.location)}" data-detail-amount="${row.amount === null ? '—' : numberRenderer.display(row.amount)}" data-detail-view aria-label="${viewLabel}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></a>`;
 
                     if (table.dataset.detailUrl === undefined) {
-                        return row.detail_file_path === null ? '—' : viewButton;
+                        return viewButton;
                     }
 
                     const action = table.dataset.detailUrl.replace('__id__', encodeURIComponent(row.id));
@@ -174,16 +264,19 @@ document.querySelectorAll('[data-server-table]').forEach((table) => {
                     const answers = row.answers.length === 0 && answer !== null
                         ? [{ answer, answered_by_name: row.answered_by_name, answered_at: row.answered_at }]
                         : row.answers;
+                    const description = row.description === null ? '' : `<p class="answer-description" title="${textRenderer.display(row.description)}">${textRenderer.display(row.description)}</p>`;
                     answerHistories.set(Number(row.id), { answers, location: row.location, description: row.description });
 
                     if (row.archived_at !== null) {
-                        return '—';
+                        return description || '—';
                     }
 
                     const action = table.dataset.answerUrl.replace('__id__', encodeURIComponent(row.id));
                     const label = answer === null ? 'Save answer' : 'Add answer';
+                    const latestAnswer = answers[0]?.answer ?? answer ?? '';
+                    const answerValue = row.answered_at === null ? '' : textRenderer.display(latestAnswer);
 
-                    return `<form method="POST" action="${action}" class="answer-form" data-answer-form><input type="hidden" name="_token" value="${table.dataset.csrf}"><label class="sr-only" for="answer-${Number(row.id)}">Add answer</label><div class="answer-entry"><input id="answer-${Number(row.id)}" type="text" name="answer" maxlength="10000" autocomplete="off" required><button class="button button-primary answer-save-button" type="submit" aria-label="${label}" title="${label}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h12l2 2v16H5zM8 3v6h8V3M8 21v-8h8v8"/></svg></button></div><span class="form-error" data-form-error role="alert"></span></form>`;
+                    return `<form method="POST" action="${action}" class="answer-form" data-answer-form><input type="hidden" name="_token" value="${table.dataset.csrf}"><label class="sr-only" for="answer-${Number(row.id)}">Add answer</label><div class="answer-entry"><textarea id="answer-${Number(row.id)}" name="answer" data-original-value="${answerValue}" data-answer-textarea rows="1" maxlength="10000" autocomplete="off" required>${answerValue}</textarea><button class="button button-primary answer-save-button" type="submit" aria-label="${label}" title="${label}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h12l2 2v16H5zM8 3v6h8V3M8 21v-8h8v8"/></svg></button>${description}</div><span class="form-error" data-form-error role="alert"></span></form>`;
                 },
             },
             {
@@ -263,7 +356,7 @@ document.querySelectorAll('[data-server-table]').forEach((table) => {
         autoWidth: tableType !== 'questions',
         lengthMenu: [10, 25, 50, 100],
         order: tableType === 'imports' ? [[2, 'desc']] : [[['questions', 'dashboard-locations'].includes(tableType) ? 1 : 0, 'asc']],
-        pageLength: 50,
+        pageLength: tableType === 'questions' ? 10 : 50,
         processing: true,
         searchDelay: 300,
         serverSide: true,
@@ -312,6 +405,31 @@ document.querySelectorAll('[data-server-table]').forEach((table) => {
     }
 
     if (tableType === 'questions') {
+        const bulkAnswerForm = document.querySelector('[data-bulk-answer-form]');
+        const statusLegend = document.querySelector('[data-question-status-legend]');
+        const updateBulkAnswerVisibility = () => {
+            bulkAnswerForm.hidden = selectedQuestionIds.size === 0;
+        };
+        const resizeAnswerTextarea = (textarea) => {
+            textarea.style.height = 'auto';
+            textarea.style.height = `${textarea.scrollHeight}px`;
+            textarea.style.overflowY = textarea.scrollHeight > textarea.clientHeight ? 'auto' : 'hidden';
+        };
+        const constrainAnswerTextarea = (textarea) => {
+            const minimumHeight = parseFloat(window.getComputedStyle(textarea).minHeight);
+            textarea.style.maxHeight = 'none';
+            textarea.style.height = `${minimumHeight}px`;
+
+            const cellStyles = window.getComputedStyle(textarea.closest('td'));
+            const form = textarea.closest('[data-answer-form]');
+            const availableHeight = textarea.closest('tr').getBoundingClientRect().height
+                - parseFloat(cellStyles.paddingTop)
+                - parseFloat(cellStyles.paddingBottom)
+                - (form.getBoundingClientRect().height - textarea.getBoundingClientRect().height);
+
+            textarea.style.maxHeight = `${Math.max(minimumHeight, availableHeight)}px`;
+            resizeAnswerTextarea(textarea);
+        };
         const expandedLocationGroups = new Set();
         const detailModal = document.querySelector('[data-detail-modal]');
         const detailFrame = detailModal.querySelector('[data-detail-preview]');
@@ -385,30 +503,40 @@ document.querySelectorAll('[data-server-table]').forEach((table) => {
             }
 
             button.disabled = true;
+            const archive = (body) => fetch(button.dataset.url, {
+                method: 'POST',
+                headers: {
+                    Accept: 'application/json',
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': table.dataset.csrf,
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+                credentials: 'same-origin',
+                body,
+            });
 
             try {
-                const response = await fetch(button.dataset.url, {
-                    method: 'POST',
-                    headers: {
-                        Accept: 'application/json',
-                        'Content-Type': 'application/json',
-                        'X-CSRF-TOKEN': table.dataset.csrf,
-                        'X-Requested-With': 'XMLHttpRequest',
-                    },
-                    credentials: 'same-origin',
-                    body: '{}',
-                });
-                const data = await response.json();
+                let response = await archive('{}');
+                let data = await response.json();
+
+                if (response.status === 409 && data.warning) {
+                    if (! await confirmArchive(data.message)) {
+                        return;
+                    }
+
+                    response = await archive(JSON.stringify({ confirm_unexported: true }));
+                    data = await response.json();
+                }
 
                 if (!response.ok) {
-                    window.alert(data.errors?.question?.[0] ?? data.message ?? 'Unable to archive the question.');
+                    showDialogError(data.errors?.question?.[0] ?? data.message ?? 'Unable to archive the question.');
                     return;
                 }
 
                 selectedQuestionIds.clear();
                 dataTable.ajax.reload(null, false);
             } catch {
-                window.alert('Unable to connect. Please try again.');
+                showDialogError('Unable to connect. Please try again.');
             } finally {
                 button.disabled = false;
             }
@@ -439,14 +567,14 @@ document.querySelectorAll('[data-server-table]').forEach((table) => {
                 const data = await response.json();
 
                 if (!response.ok) {
-                    window.alert(data.errors?.question?.[0] ?? data.errors?.status?.[0] ?? data.message ?? 'Unable to update the question status.');
+                    showDialogError(data.errors?.question?.[0] ?? data.errors?.status?.[0] ?? data.message ?? 'Unable to update the question status.');
                     return;
                 }
 
                 selectedQuestionIds.clear();
                 dataTable.ajax.reload(null, false);
             } catch {
-                window.alert('Unable to connect. Please try again.');
+                showDialogError('Unable to connect. Please try again.');
             } finally {
                 buttons.forEach((statusButton) => { statusButton.disabled = false; });
             }
@@ -489,7 +617,13 @@ document.querySelectorAll('[data-server-table]').forEach((table) => {
 
                 button.setAttribute('aria-label', 'Replace image');
                 button.setAttribute('title', 'Replace image');
-                wrapper.querySelector('[data-detail-view]').hidden = false;
+                const viewButton = wrapper.querySelector('[data-detail-view]');
+                viewButton.href = viewButton.dataset.detailUrl;
+                viewButton.dataset.bsToggle = 'modal';
+                viewButton.dataset.bsTarget = '#detail-preview-modal';
+                viewButton.removeAttribute('aria-disabled');
+                viewButton.setAttribute('aria-label', 'View detail');
+                viewButton.setAttribute('title', 'View detail');
                 status.textContent = data.message;
             } catch {
                 button.setAttribute('aria-label', originalLabel);
@@ -501,10 +635,57 @@ document.querySelectorAll('[data-server-table]').forEach((table) => {
             }
         });
 
+        table.addEventListener('input', (event) => {
+            if (event.target.matches('[data-answer-textarea]')) {
+                resizeAnswerTextarea(event.target);
+            }
+        });
+
+        $(table).on('change', '[data-question-option-select]', async function () {
+            const input = this;
+
+            if (input.value === input.dataset.originalValue) {
+                return;
+            }
+
+            const field = input.dataset.field;
+            const status = input.closest('.question-option-picker').querySelector('[data-question-option-status]');
+            input.disabled = true;
+            status.textContent = 'Saving…';
+
+            try {
+                const response = await fetch(input.dataset.url, {
+                    method: 'POST',
+                    headers: {
+                        Accept: 'application/json',
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': table.dataset.csrf,
+                        'X-Requested-With': 'XMLHttpRequest',
+                    },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({ [field]: input.value }),
+                });
+                const data = await response.json();
+
+                if (!response.ok) {
+                    status.textContent = data.errors?.[field]?.[0] ?? data.message ?? 'Unable to save the value.';
+                    return;
+                }
+
+                input.dataset.originalValue = input.value;
+                status.textContent = data.message;
+            } catch {
+                status.textContent = 'Unable to connect. Please try again.';
+            } finally {
+                input.disabled = false;
+            }
+        });
+
         document.querySelectorAll('[data-question-filter]').forEach((button) => {
             button.addEventListener('click', () => {
                 table.dataset.status = button.dataset.questionFilter;
                 dataTable.column(8).visible(table.dataset.status !== 'archived', false);
+                statusLegend.hidden = table.dataset.status !== 'all';
                 selectedQuestionIds.clear();
                 document.querySelectorAll('[data-question-filter]').forEach((filter) => {
                     const isActive = filter === button;
@@ -519,6 +700,7 @@ document.querySelectorAll('[data-server-table]').forEach((table) => {
             if (event.target.matches('[data-question-select]')) {
                 const id = Number(event.target.value);
                 event.target.checked ? selectedQuestionIds.add(id) : selectedQuestionIds.delete(id);
+                updateBulkAnswerVisibility();
             }
 
             if (event.target.matches('[data-select-page]')) {
@@ -528,18 +710,23 @@ document.querySelectorAll('[data-server-table]').forEach((table) => {
                         ? selectedQuestionIds.add(Number(checkbox.value))
                         : selectedQuestionIds.delete(Number(checkbox.value));
                 });
+                updateBulkAnswerVisibility();
             }
         });
 
         dataTable.on('preDraw', () => {
+            $(table).find('[data-question-option-select].select2-hidden-accessible').select2('destroy');
             table.querySelectorAll('[data-location-group-row]').forEach((row) => row.remove());
         });
 
         dataTable.on('draw', () => {
+            $(table).find('[data-question-option-select]').select2({ width: '100%' });
+            table.querySelectorAll('[data-answer-textarea]').forEach(constrainAnswerTextarea);
             table.querySelectorAll('[data-question-select]').forEach((checkbox) => {
                 checkbox.checked = selectedQuestionIds.has(Number(checkbox.value));
             });
             document.querySelectorAll('[data-select-page]').forEach((checkbox) => { checkbox.checked = false; });
+            updateBulkAnswerVisibility();
 
             let previousLocation = null;
             const groupColumnSpan = columns.length - 1 - (table.dataset.status === 'archived' ? 1 : 0);
@@ -547,6 +734,14 @@ document.querySelectorAll('[data-server-table]').forEach((table) => {
                 const rowData = this.data();
                 const row = this.node();
                 const expanded = expandedLocationGroups.has(rowData.location);
+                row.classList.remove('question-row-answered', 'question-row-pending', 'question-row-archived');
+
+                if (table.dataset.status === 'all') {
+                    row.classList.add(rowData.archived_at !== null
+                        ? 'question-row-archived'
+                        : rowData.answered_at === null ? 'question-row-pending' : 'question-row-answered');
+                }
+
                 row.dataset.locationGroupMember = rowData.location;
                 row.hidden = !expanded;
 
@@ -581,13 +776,28 @@ document.querySelectorAll('[data-server-table]').forEach((table) => {
             button.disabled = true;
 
             try {
-                const response = await fetch(form.action, {
+                let response = await fetch(form.action, {
                     method: 'POST',
                     body: formData,
                     headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     credentials: 'same-origin',
                 });
-                const data = await response.json();
+                let data = await response.json();
+
+                if (response.status === 409 && data.warning) {
+                    if (! await confirmArchive(data.message)) {
+                        return;
+                    }
+
+                    formData.set('confirm_unexported', '1');
+                    response = await fetch(form.action, {
+                        method: 'POST',
+                        body: formData,
+                        headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                        credentials: 'same-origin',
+                    });
+                    data = await response.json();
+                }
 
                 if (!response.ok) {
                     error.textContent = data.errors?.entries?.[0] ?? data.message ?? 'Unable to archive the questions.';
@@ -604,10 +814,54 @@ document.querySelectorAll('[data-server-table]').forEach((table) => {
             }
         });
 
+        document.querySelector('[data-bulk-answer-form]')?.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const form = event.target;
+            const button = event.submitter;
+            const error = form.querySelector('[data-form-error]');
+            const success = form.querySelector('[data-bulk-success]');
+            const formData = new FormData(form);
+            formData.set('scope', 'selected');
+            error.textContent = '';
+            success.textContent = '';
+
+            if (selectedQuestionIds.size === 0) {
+                error.textContent = 'Select at least one question.';
+                return;
+            }
+
+            selectedQuestionIds.forEach((id) => formData.append('entries[]', id));
+            button.disabled = true;
+
+            try {
+                const response = await fetch(form.action, {
+                    method: 'POST',
+                    body: formData,
+                    headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    credentials: 'same-origin',
+                });
+                const data = await response.json();
+
+                if (!response.ok) {
+                    error.textContent = data.errors?.answer?.[0] ?? data.errors?.entries?.[0] ?? data.message ?? 'Unable to answer the questions.';
+                    return;
+                }
+
+                selectedQuestionIds.clear();
+                form.reset();
+                success.textContent = data.message;
+                dataTable.ajax.reload(null, false);
+            } catch {
+                error.textContent = 'Unable to connect. Please try again.';
+            } finally {
+                button.disabled = false;
+            }
+        });
+
         table.addEventListener('focusout', (event) => {
             const input = event.target;
 
-            if (!input.matches('[data-answer-form] input[name="answer"]') || input.value.trim() === '') {
+            if (!input.matches('[data-answer-form] textarea[name="answer"]') || input.value.trim() === '' || input.value === input.dataset.originalValue) {
                 return;
             }
 
@@ -648,6 +902,11 @@ document.querySelectorAll('[data-server-table]').forEach((table) => {
             event.preventDefault();
             const button = form.querySelector('button[type="submit"]');
             const error = form.querySelector('[data-form-error]');
+
+            if (form.elements.answer.value === form.elements.answer.dataset.originalValue) {
+                return;
+            }
+
             button.disabled = true;
             error.textContent = '';
 

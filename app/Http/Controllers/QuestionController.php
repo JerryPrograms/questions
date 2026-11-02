@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Support\AuditLog;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -17,10 +18,19 @@ class QuestionController extends Controller
     public function index(Request $request): View
     {
         $locations = $this->selectedLocations($request);
+        $options = DB::table('location_question_options')
+            ->whereIn('location', $locations)
+            ->orderBy('value')
+            ->get();
 
         return view('admin.questions.index', [
             'locations' => $locations,
             'allLocations' => $request->boolean('all'),
+            'questionOptions' => $options->groupBy('type')->map(
+                fn ($typeOptions) => $typeOptions->groupBy('location')->map(
+                    fn ($locationOptions) => $locationOptions->pluck('value')->values(),
+                ),
+            ),
         ]);
     }
 
@@ -46,7 +56,7 @@ class QuestionController extends Controller
 
         if ($status === 'archived') {
             $query->whereNotNull('archived_at');
-        } else {
+        } elseif ($status !== 'all') {
             $query->whereNull('archived_at');
 
             if ($status === 'answered') {
@@ -81,7 +91,7 @@ class QuestionController extends Controller
             7 => 'answered_at',
         ][$order['column']];
         $dataQuery = $query
-            ->select('accounting_entries.id', 'location', 'transaction_date', 'bank_name', 'check_no', 'paid_to_by', 'account', DB::raw('COALESCE(credit, debit) as amount'), DB::raw("CASE WHEN credit IS NOT NULL THEN 'Credit' ELSE 'Debit' END as credit_debit"), 'description', 'answer', 'answered_at', 'answering_users.name as answered_by_name', 'detail_file_path', 'archived_at')
+            ->select('accounting_entries.id', 'location', 'transaction_date', 'bank_name', 'check_no', 'paid_to_by', 'account', DB::raw('COALESCE(credit, debit) as amount'), DB::raw("CASE WHEN credit IS NOT NULL THEN 'Credit' ELSE 'Debit' END as credit_debit"), 'description', 'answer', 'answered_at', 'answer_exported_at', 'answering_users.name as answered_by_name', 'detail_file_path', 'archived_at')
             ->orderBy('location', $orderColumn === 'location' ? $order['dir'] : 'asc');
 
         if ($orderColumn !== 'location') {
@@ -96,7 +106,7 @@ class QuestionController extends Controller
             ->leftJoin('users as answering_users', 'answering_users.id', '=', 'accounting_entry_answers.answered_by')
             ->whereIn('accounting_entry_id', $questions->pluck('id'))
             ->select('accounting_entry_id', 'accounting_entry_answers.answer', 'accounting_entry_answers.answered_at', 'answering_users.name as answered_by_name')
-            ->orderBy('accounting_entry_answers.id')
+            ->orderByDesc('accounting_entry_answers.id')
             ->get()
             ->groupBy('accounting_entry_id');
         $questions->each(function (object $question) use ($answers): void {
@@ -125,7 +135,7 @@ class QuestionController extends Controller
                 throw ValidationException::withMessages(['answer' => 'Archived questions cannot be changed.']);
             }
 
-            $this->saveAnswer($question, $request->user()->id, $data['answer']);
+            $this->saveAnswer($question, $request, $data['answer']);
 
             return $question->location;
         });
@@ -135,6 +145,57 @@ class QuestionController extends Controller
         return $request->expectsJson()
             ? response()->json(['message' => $message])
             : redirect()->route('admin.questions.index', ['location' => $location])->with('status', $message);
+    }
+
+    public function updateAccount(Request $request, int $entry): JsonResponse
+    {
+        return $this->updateQuestionOption($request, $entry, 'account', 'account', 'Account');
+    }
+
+    public function updatePaidToBy(Request $request, int $entry): JsonResponse
+    {
+        return $this->updateQuestionOption($request, $entry, 'paid_to_by', 'paid_to_by', 'Paid to/by');
+    }
+
+    private function updateQuestionOption(Request $request, int $entry, string $field, string $type, string $label): JsonResponse
+    {
+        return DB::transaction(function () use ($entry, $field, $label, $request, $type): JsonResponse {
+            $question = DB::table('accounting_entries')->where('id', $entry)->lockForUpdate()->first();
+            abort_if($question === null, 404);
+            $this->authorizeLocation($request, $question->location);
+            $data = $request->validate([
+                $field => [
+                    'required',
+                    'string',
+                    'max:255',
+                    Rule::exists('location_question_options', 'value')
+                        ->where('location', $question->location)
+                        ->where('type', $type),
+                ],
+            ]);
+
+            if ($question->archived_at !== null) {
+                throw ValidationException::withMessages([$field => 'Archived questions cannot be changed.']);
+            }
+
+            DB::table('accounting_entries')->where('id', $entry)->update([
+                $field => $data[$field],
+                'answer_exported_at' => null,
+                'updated_at' => now(),
+            ]);
+            AuditLog::record(
+                $request,
+                'question.'.$field.'_updated',
+                $label.' changed for question #'.$entry.'.',
+                'question',
+                $entry,
+                $question->location,
+                [$field => $question->{$field}],
+                [$field => $data[$field]],
+            );
+
+            return response()->json(['message' => $label.' saved.']);
+        });
     }
 
     public function bulkAnswer(Request $request): JsonResponse
@@ -156,10 +217,10 @@ class QuestionController extends Controller
         }
 
         $updated = DB::transaction(function () use ($query, $data, $request): int {
-            $questions = $query->lockForUpdate()->get(['id', 'answer']);
+            $questions = $query->lockForUpdate()->get(['id', 'answer', 'location']);
 
             foreach ($questions as $question) {
-                $this->saveAnswer($question, $request->user()->id, $data['answer']);
+                $this->saveAnswer($question, $request, $data['answer']);
             }
 
             return $questions->count();
@@ -197,6 +258,11 @@ class QuestionController extends Controller
             'detail_file_path' => $path,
             'updated_at' => now(),
         ]);
+        AuditLog::record($request, 'question.detail_uploaded', 'Uploaded a detail file for question #'.$entry.'.', 'question', $entry, $question->location, [
+            'file_name' => $question->detail_file_path === null ? null : basename($question->detail_file_path),
+        ], [
+            'file_name' => basename($path),
+        ]);
 
         if ($question->detail_file_path !== null && $question->detail_file_path !== $path) {
             Storage::disk('local')->delete($question->detail_file_path);
@@ -227,11 +293,22 @@ class QuestionController extends Controller
             throw ValidationException::withMessages(['question' => 'Only answered questions can be archived.']);
         }
 
-        DB::table('accounting_entries')->where('id', $entry)->whereNull('archived_at')->update([
+        if ($question->answer_exported_at === null && ! $request->boolean('confirm_unexported')) {
+            return response()->json([
+                'message' => 'This answer has not been exported yet. Archive it anyway?',
+                'warning' => 'unexported_answer',
+            ], 409);
+        }
+
+        $updated = DB::table('accounting_entries')->where('id', $entry)->whereNull('archived_at')->update([
             'archived_by' => $request->user()->id,
             'archived_at' => now(),
             'updated_at' => now(),
         ]);
+
+        if ($updated === 1) {
+            AuditLog::record($request, 'question.archived', 'Archived question #'.$entry.'.', 'question', $entry, $question->location, ['status' => 'answered'], ['status' => 'archived']);
+        }
 
         return response()->json(['message' => 'Question archived.']);
     }
@@ -260,6 +337,7 @@ class QuestionController extends Controller
         }
 
         DB::table('accounting_entries')->where('id', $entry)->whereNotNull('archived_at')->update($updates);
+        AuditLog::record($request, 'question.restored', 'Restored question #'.$entry.' to '.$data['status'].'.', 'question', $entry, $question->location, ['status' => 'archived'], ['status' => $data['status']]);
 
         return response()->json(['message' => 'Question moved to '.ucfirst($data['status']).'.']);
     }
@@ -271,6 +349,7 @@ class QuestionController extends Controller
             'scope' => ['required', 'in:selected,all_answered'],
             'entries' => ['required_if:scope,selected', 'array', 'min:1'],
             'entries.*' => ['integer', 'distinct'],
+            'confirm_unexported' => ['nullable', 'boolean'],
         ]);
 
         $query = DB::table('accounting_entries')
@@ -282,11 +361,30 @@ class QuestionController extends Controller
             $query->whereIn('id', $data['entries']);
         }
 
-        $updated = $query->update([
-            'archived_by' => $request->user()->id,
-            'archived_at' => now(),
-            'updated_at' => now(),
-        ]);
+        $unexported = (clone $query)->whereNull('answer_exported_at')->count();
+
+        if ($unexported > 0 && ! $request->boolean('confirm_unexported')) {
+            return response()->json([
+                'message' => $unexported.' '.str('answer')->plural($unexported).' '.($unexported === 1 ? 'has' : 'have').' not been exported yet. Archive anyway?',
+                'warning' => 'unexported_answers',
+                'unexported' => $unexported,
+            ], 409);
+        }
+
+        $questions = $query->get(['id', 'location']);
+        $updated = DB::transaction(function () use ($query, $questions, $request): int {
+            $updated = $query->update([
+                'archived_by' => $request->user()->id,
+                'archived_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            foreach ($questions as $question) {
+                AuditLog::record($request, 'question.archived', 'Archived question #'.$question->id.'.', 'question', $question->id, $question->location, ['status' => 'answered'], ['status' => 'archived']);
+            }
+
+            return $updated;
+        });
 
         return response()->json([
             'message' => $updated.' '.str('question')->plural($updated).' archived.',
@@ -355,14 +453,16 @@ class QuestionController extends Controller
         return $answer;
     }
 
-    private function saveAnswer(object $question, int $userId, string $answer): void
+    private function saveAnswer(object $question, Request $request, string $answer): void
     {
         $answeredAt = now();
+        $userId = $request->user()->id;
 
         DB::table('accounting_entries')->where('id', $question->id)->update([
             'answer' => $this->appendAnswer($question->answer, $answer),
             'answered_by' => $userId,
             'answered_at' => $answeredAt,
+            'answer_exported_at' => null,
             'updated_at' => $answeredAt,
         ]);
         DB::table('accounting_entry_answers')->insert([
@@ -371,5 +471,6 @@ class QuestionController extends Controller
             'answered_by' => $userId,
             'answered_at' => $answeredAt,
         ]);
+        AuditLog::record($request, 'question.answered', 'Added an answer to question #'.$question->id.'.', 'question', $question->id, $question->location, null, ['answer' => $answer]);
     }
 }

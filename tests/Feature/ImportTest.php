@@ -18,7 +18,7 @@ class ImportTest extends TestCase
 
     private const HEADER = 'LOCATION,BANK NAME,DATE,CHECK NO,PAID TO/BY,ACCOUNT,CREDIT,DEBIT,DESCRIPTION,CLASS';
 
-    public function test_only_admin_can_import_csv_and_duplicate_files_are_rejected(): void
+    public function test_only_admin_can_import_csv_and_duplicate_files_are_upserted(): void
     {
         $file = self::HEADER."\nMain Store,Local Bank,2026-10-01,,Supplier,Ask My Accountant,123.45,,Supplies,Central\n";
         $manager = User::factory()->create();
@@ -39,7 +39,8 @@ class ImportTest extends TestCase
 
         $this->postJson('/admin/imports', [
             'file' => UploadedFile::fake()->createWithContent('ledger.csv', $file),
-        ])->assertUnprocessable()->assertJsonValidationErrors('file');
+        ])->assertOk()->assertJsonPath('message', '1 rows imported.');
+        $this->assertDatabaseCount('imports', 1);
         $this->assertDatabaseCount('accounting_entries', 1);
     }
 
@@ -87,14 +88,21 @@ class ImportTest extends TestCase
         $export = IOFactory::load($response->baseResponse->getFile()->getPathname());
         $sheet = $export->getActiveSheet();
         $this->assertSame('LOCATION', $sheet->getCell('A1')->getValue());
-        $this->assertSame('ANSWER', $sheet->getCell('K1')->getValue());
-        $this->assertSame('ANSWERED BY', $sheet->getCell('L1')->getValue());
+        $this->assertSame('TXNID', $sheet->getCell('K1')->getValue());
+        $this->assertSame('ANSWER', $sheet->getCell('L1')->getValue());
+        $this->assertSame('ANSWERED BY', $sheet->getCell('M1')->getValue());
         $this->assertSame('Main Store', $sheet->getCell('A2')->getValue());
-        $this->assertSame("Approved for payment.\nFollow-up note.", $sheet->getCell('K2')->getValue());
-        $this->assertTrue($sheet->getStyle('K2')->getAlignment()->getWrapText());
-        $this->assertSame($admin->name, $sheet->getCell('L2')->getValue());
+        $this->assertSame("Approved for payment.\nFollow-up note.", $sheet->getCell('L2')->getValue());
+        $this->assertTrue($sheet->getStyle('L2')->getAlignment()->getWrapText());
+        $this->assertSame($admin->name, $sheet->getCell('M2')->getValue());
         $this->assertSame(2, $sheet->getHighestDataRow());
         $export->disconnectWorksheets();
+        $entryId = DB::table('accounting_entries')->where('location', 'Main Store')->value('id');
+        $this->assertNotNull(DB::table('accounting_entries')->where('id', $entryId)->value('answer_exported_at'));
+
+        $this->postJson(route('admin.questions.answer', $entryId), ['answer' => 'Changed after export.'])
+            ->assertOk();
+        $this->assertNull(DB::table('accounting_entries')->where('id', $entryId)->value('answer_exported_at'));
     }
 
     public function test_invalid_rows_do_not_partially_import(): void

@@ -2,12 +2,15 @@
 
 namespace Tests\Feature;
 
+use App\Mail\LoginVerificationCode;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
 
 class PortalAccessTest extends TestCase
@@ -26,7 +29,7 @@ class PortalAccessTest extends TestCase
         $admin = User::factory()->create(['role' => 'admin']);
         $manager = User::factory()->create(['role' => 'manager']);
 
-        $this->postJson('/login', ['email' => $admin->email, 'password' => 'password'])
+        $this->loginWithTwoFactor($admin)
             ->assertOk()->assertJsonPath('redirect', route('admin.imports.create'));
         $this->get('/dashboard')->assertRedirect(route('admin.dashboard'));
         $this->get('/admin')
@@ -35,7 +38,7 @@ class PortalAccessTest extends TestCase
             ->assertSee('Toggle navigation');
         $this->postJson('/logout')->assertOk()->assertJsonPath('redirect', route('login'));
 
-        $this->postJson('/login', ['email' => $manager->email, 'password' => 'password'])
+        $this->loginWithTwoFactor($manager)
             ->assertOk()->assertJsonPath('redirect', route('manager.dashboard'));
         $this->get('/dashboard')->assertRedirect(route('manager.dashboard'));
         $this->get('/manager')
@@ -58,6 +61,15 @@ class PortalAccessTest extends TestCase
         $this->actingAs($admin)->post('/admin/imports', [
             'file' => UploadedFile::fake()->createWithContent('locations.csv', $file),
         ])->assertRedirect();
+        DB::table('accounts')->insert([
+            ['account' => 'Office Supplies', 'created_at' => now(), 'updated_at' => now()],
+            ['account' => 'Travel Expense', 'created_at' => now(), 'updated_at' => now()],
+        ]);
+        DB::table('location_question_options')->insert([
+            ['location' => 'Main Store', 'type' => 'account', 'value' => 'Office Supplies', 'created_at' => now(), 'updated_at' => now()],
+            ['location' => 'Main Store', 'type' => 'account', 'value' => 'Travel Expense', 'created_at' => now(), 'updated_at' => now()],
+            ['location' => 'Main Store', 'type' => 'paid_to_by', 'value' => 'Preferred Supplier', 'created_at' => now(), 'updated_at' => now()],
+        ]);
         $dataTableParameters = http_build_query([
             'draw' => 1,
             'start' => 0,
@@ -88,6 +100,15 @@ class PortalAccessTest extends TestCase
             ->assertSee('Amount')
             ->assertSee('Detail')
             ->assertSee('answer-history-modal')
+            ->assertSee('data-question-status-legend', false)
+            ->assertSee('Answer selected questions')
+            ->assertSee('Office Supplies')
+            ->assertSee('Travel Expense')
+            ->assertSee('Preferred Supplier')
+            ->assertSee(route('admin.questions.account', '__id__'))
+            ->assertSee(route('admin.questions.paid-to-by', '__id__'))
+            ->assertSee(route('admin.questions.bulk-answer'))
+            ->assertSee('data-bulk-answer-form hidden', false)
             ->assertSee(route('admin.questions.export-answered'))
             ->assertSee(route('admin.questions.data', ['locations' => ['Main Store']]));
         $this->get(route('admin.questions.index', ['locations' => ['Main Store', 'North Store']]))
@@ -118,6 +139,12 @@ class PortalAccessTest extends TestCase
             ->assertOk()
             ->assertJsonPath('recordsFiltered', 1);
         $entryId = DB::table('accounting_entries')->where('location', 'Main Store')->value('id');
+        $this->postJson(route('admin.questions.account', $entryId), ['account' => 'Unknown Account'])
+            ->assertUnprocessable()->assertJsonValidationErrors('account');
+        $this->postJson(route('admin.questions.account', $entryId), ['account' => 'Office Supplies'])
+            ->assertOk()->assertJsonPath('message', 'Account saved.');
+        $this->postJson(route('admin.questions.paid-to-by', $entryId), ['paid_to_by' => 'Preferred Supplier'])
+            ->assertOk()->assertJsonPath('message', 'Paid to/by saved.');
         $this->postJson(route('admin.questions.answer', $entryId), ['answer' => 'Approved for payment.'])
             ->assertOk()
             ->assertJsonPath('message', 'Answer saved.');
@@ -128,7 +155,13 @@ class PortalAccessTest extends TestCase
             'id' => $entryId,
             'answer' => "Approved for payment.\nFollow-up note.",
             'answered_by' => $admin->id,
+            'account' => 'Office Supplies',
+            'paid_to_by' => 'Preferred Supplier',
         ]);
+        DB::table('accounting_entries')->where('id', $entryId)->update(['answer_exported_at' => now()]);
+        $this->postJson(route('admin.questions.account', $entryId), ['account' => 'Travel Expense'])
+            ->assertOk();
+        $this->assertDatabaseHas('accounting_entries', ['id' => $entryId, 'account' => 'Travel Expense', 'answer_exported_at' => null]);
         $this->getJson(route('admin.dashboard.data').'?'.$questionTableParameters)
             ->assertOk()
             ->assertJsonPath('data.0.answered_questions', 1)
@@ -145,9 +178,9 @@ class PortalAccessTest extends TestCase
             ->assertJsonPath('recordsFiltered', 1)
             ->assertJsonPath('data.0.answer', "Approved for payment.\nFollow-up note.")
             ->assertJsonPath('data.0.answered_by_name', $admin->name)
-            ->assertJsonPath('data.0.answers.0.answer', 'Approved for payment.')
+            ->assertJsonPath('data.0.answers.0.answer', 'Follow-up note.')
             ->assertJsonPath('data.0.answers.0.answered_by_name', $admin->name)
-            ->assertJsonPath('data.0.answers.1.answer', 'Follow-up note.')
+            ->assertJsonPath('data.0.answers.1.answer', 'Approved for payment.')
             ->assertJsonPath('data.0.answers.1.answered_by_name', $admin->name);
         $this->assertNotNull($answeredQuestions->json('data.0.answered_at'));
         $this->assertNotNull($answeredQuestions->json('data.0.answers.0.answered_at'));
@@ -176,7 +209,7 @@ class PortalAccessTest extends TestCase
             ->assertJsonPath('data.0.locations', ['Main Store']);
 
         $this->post('/logout');
-        $this->postJson('/login', ['email' => $manager->email, 'password' => 'password'])
+        $this->loginWithTwoFactor($manager)
             ->assertOk()->assertJsonPath('redirect', route('manager.dashboard'));
         $this->get('/manager')
             ->assertOk()
@@ -190,12 +223,19 @@ class PortalAccessTest extends TestCase
             ->assertOk()
             ->assertSee(route('manager.questions.data'))
             ->assertSee(route('manager.questions.answer', '__id__'))
+            ->assertSee(route('manager.questions.account', '__id__'))
+            ->assertSee(route('manager.questions.paid-to-by', '__id__'))
+            ->assertSee(route('manager.questions.bulk-answer'))
             ->assertDontSee(route('admin.questions.export-answered'));
         $this->getJson(route('manager.questions.data').'?'.$questionTableParameters)
             ->assertOk()
             ->assertJsonPath('recordsTotal', 1)
             ->assertJsonPath('data.0.location', 'Main Store');
         $northEntryId = DB::table('accounting_entries')->where('location', 'North Store')->value('id');
+        $this->postJson(route('manager.questions.account', $northEntryId), ['account' => 'Office Supplies'])
+            ->assertForbidden();
+        $this->postJson(route('manager.questions.account', $entryId), ['account' => 'Office Supplies'])
+            ->assertOk();
         $this->postJson(route('manager.questions.answer', $northEntryId), ['answer' => 'Wrong location'])
             ->assertForbidden();
         $this->postJson(route('manager.questions.answer', $entryId), ['answer' => 'Manager follow-up'])
@@ -290,15 +330,29 @@ class PortalAccessTest extends TestCase
         $this->assertSame(5, DB::table('accounting_entry_answers')->where('answered_by', $admin->id)->count());
 
         $this->postJson(route('admin.questions.archive', $entryIds[0]))
+            ->assertConflict()
+            ->assertJsonPath('warning', 'unexported_answer');
+        $this->postJson(route('admin.questions.archive', $entryIds[0]), ['confirm_unexported' => true])
             ->assertOk()->assertJsonPath('message', 'Question archived.');
         $this->postJson(route('admin.questions.bulk-archive'), [
             'location' => 'Main Store',
             'scope' => 'selected',
             'entries' => [$entryIds[1], $entryIds[2]],
+        ])->assertConflict()->assertJsonPath('unexported', 2);
+        $this->postJson(route('admin.questions.bulk-archive'), [
+            'location' => 'Main Store',
+            'scope' => 'selected',
+            'entries' => [$entryIds[1], $entryIds[2]],
+            'confirm_unexported' => true,
         ])->assertOk()->assertJsonPath('updated', 2);
         $this->postJson(route('admin.questions.bulk-archive'), [
             'location' => 'Main Store',
             'scope' => 'all_answered',
+        ])->assertConflict()->assertJsonPath('unexported', 1);
+        $this->postJson(route('admin.questions.bulk-archive'), [
+            'location' => 'Main Store',
+            'scope' => 'all_answered',
+            'confirm_unexported' => true,
         ])->assertOk()->assertJsonPath('updated', 1);
         $this->assertSame(4, DB::table('accounting_entries')->where('archived_by', $admin->id)->whereNotNull('archived_at')->count());
 
@@ -309,7 +363,7 @@ class PortalAccessTest extends TestCase
             'order' => [['column' => 1, 'dir' => 'asc']],
         ]);
         $this->getJson(route('admin.questions.data', ['location' => 'Main Store']).'&'.$questionTableParameters.'&status=all')
-            ->assertOk()->assertJsonPath('recordsFiltered', 0);
+            ->assertOk()->assertJsonPath('recordsFiltered', 4);
         $this->getJson(route('admin.questions.data', ['location' => 'Main Store']).'&'.$questionTableParameters.'&status=archived')
             ->assertOk()->assertJsonPath('recordsFiltered', 4);
 
@@ -385,5 +439,21 @@ class PortalAccessTest extends TestCase
         $admin = User::where('email', 'admin@example.com')->firstOrFail();
         $this->assertSame('admin', $admin->role);
         $this->assertTrue(Hash::check('long-password-123', $admin->password));
+    }
+
+    private function loginWithTwoFactor(User $user): TestResponse
+    {
+        Mail::fake();
+        $this->postJson('/login', ['email' => $user->email, 'password' => 'password'])
+            ->assertOk()
+            ->assertJsonPath('redirect', route('login.verify'));
+        $code = null;
+        Mail::assertSent(LoginVerificationCode::class, function (LoginVerificationCode $mail) use ($user, &$code): bool {
+            $code = $mail->code;
+
+            return $mail->hasTo($user->email);
+        });
+
+        return $this->postJson(route('login.verify.submit'), ['code' => $code]);
     }
 }

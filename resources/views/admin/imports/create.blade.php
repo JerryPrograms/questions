@@ -7,7 +7,7 @@
 <section class="panel import-panel" aria-labelledby="upload-heading">
     <div class="panel-heading"><h3 id="upload-heading">Upload transactions</h3><span class="panel-note">Excel / CSV</span></div>
     <p class="panel-description">Choose an .xlsx or .csv file (up to 5 MB). All worksheets will be imported. Each sheet must have the following columns in this exact order:</p>
-    <p class="panel-description"><strong>LOCATION, BANK NAME, DATE, CHECK NO, PAID TO/BY, ACCOUNT, CREDIT, DEBIT, DESCRIPTION, CLASS</strong></p>
+    <p class="panel-description"><strong>LOCATION, BANK NAME, DATE, CHECK NO, PAID TO/BY, ACCOUNT, CREDIT, DEBIT, DESCRIPTION, CLASS, TXNID</strong> <small>(TXNID is optional for older files.)</small></p>
     <form method="POST" action="{{ route('admin.imports.store') }}" enctype="multipart/form-data" class="form-stack" data-ajax>@csrf
         <div class="field"><label for="file">Excel or CSV file</label><input id="file" name="file" type="file" accept=".xlsx,.csv" required><span class="field-error" data-error-for="file" role="alert">@error('file'){{ $message }}@enderror</span></div>
         <span class="form-error" data-form-error role="alert"></span>

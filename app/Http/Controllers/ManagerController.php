@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\User;
+use App\Support\AuditLog;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -173,6 +174,11 @@ class ManagerController extends Controller
 
         unset($data['password_confirmation']);
         $manager = User::create($data);
+        AuditLog::record($request, 'manager.created', 'Created manager '.$manager->name.'.', 'user', $manager->id, null, null, [
+            'name' => $manager->name,
+            'email' => $manager->email,
+            'role' => $manager->role,
+        ]);
         $redirect = route('admin.manager-locations.index', ['manager' => $manager->id]);
 
         if ($request->expectsJson()) {
@@ -193,8 +199,9 @@ class ManagerController extends Controller
             'locations.*' => ['string', 'distinct', 'max:255', Rule::exists('accounting_entries', 'location')],
         ]);
         $locations = $data['locations'] ?? [];
+        $previousLocations = DB::table('manager_locations')->where('user_id', $manager->id)->orderBy('location')->pluck('location')->all();
 
-        DB::transaction(function () use ($manager, $locations): void {
+        DB::transaction(function () use ($manager, $locations, $previousLocations, $request): void {
             DB::table('manager_locations')->where('user_id', $manager->id)->delete();
             DB::table('manager_locations')->insert(array_map(
                 fn (string $location): array => [
@@ -205,6 +212,7 @@ class ManagerController extends Controller
                 ],
                 $locations,
             ));
+            AuditLog::record($request, 'manager.locations_updated', 'Updated locations for '.$manager->name.'.', 'user', $manager->id, null, ['locations' => $previousLocations], ['locations' => $locations]);
         });
 
         $message = 'Manager locations updated.';
