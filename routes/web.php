@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\AuditLogController;
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\DeveloperOptionController;
 use App\Http\Controllers\ImportController;
 use App\Http\Controllers\ManagerController;
 use App\Http\Controllers\QuestionController;
@@ -32,6 +33,8 @@ Route::middleware('auth')->group(function (): void {
     Route::middleware('can:admin')->group(function (): void {
         Route::get('/admin', [ManagerController::class, 'index'])->name('admin.dashboard');
         Route::get('/admin/logs', [AuditLogController::class, 'index'])->name('admin.audit-logs.index');
+        Route::get('/admin/developer-options', [DeveloperOptionController::class, 'index'])->name('admin.developer-options.index');
+        Route::post('/admin/developer-options/run', [DeveloperOptionController::class, 'run'])->name('admin.developer-options.run');
         Route::get('/admin/dashboard/data', [ManagerController::class, 'dashboardData'])->name('admin.dashboard.data');
         Route::post('/admin/managers', [ManagerController::class, 'store'])->name('admin.managers.store');
         Route::get('/admin/manager-locations', [ManagerController::class, 'locations'])->name('admin.manager-locations.index');

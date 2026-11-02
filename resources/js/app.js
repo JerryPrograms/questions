@@ -17,9 +17,9 @@ $('[data-audit-filter-select]').each(function () {
         width: '100%',
     });
 });
-const confirmFormSubmit = (message) => new Promise((resolve) => {
+const confirmFormSubmit = (message, title = 'Delete option', confirmLabel = 'Delete') => new Promise((resolve) => {
     $.confirm({
-        title: 'Delete option',
+        title,
         content: message,
         type: 'red',
         animation: 'scale',
@@ -28,7 +28,7 @@ const confirmFormSubmit = (message) => new Promise((resolve) => {
         escapeKey: 'cancel',
         buttons: {
             delete: {
-                text: 'Delete',
+                text: confirmLabel,
                 btnClass: 'btn-red',
                 action: () => resolve(true),
             },
@@ -48,7 +48,7 @@ document.addEventListener('submit', async (event) => {
 
     event.preventDefault();
 
-    if (form.dataset.confirm && ! await confirmFormSubmit(form.dataset.confirm)) {
+    if (form.dataset.confirm && ! await confirmFormSubmit(form.dataset.confirm, form.dataset.confirmTitle, form.dataset.confirmLabel)) {
         return;
     }
 

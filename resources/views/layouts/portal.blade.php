@@ -21,6 +21,7 @@
                 <a class="nav-link {{ request()->routeIs('admin.imports.index', 'admin.imports.show') ? 'active' : '' }}" href="{{ route('admin.imports.index') }}"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h8"/></svg> Uploaded files</a>
                 <a class="nav-link {{ request()->routeIs('admin.question-options.*') ? 'active' : '' }}" href="{{ route('admin.question-options.index') }}"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10M8 3v6M16 9v6M10 15v6"/></svg> Accounts & payees</a>
                 <a class="nav-link {{ request()->routeIs('admin.audit-logs.*') ? 'active' : '' }}" href="{{ route('admin.audit-logs.index') }}"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8v4l3 2M21 12a9 9 0 1 1-9-9 9 9 0 0 1 9 9"/></svg> Activity logs</a>
+                @if(config('app.devoption'))<a class="nav-link {{ request()->routeIs('admin.developer-options.*') ? 'active' : '' }}" href="{{ route('admin.developer-options.index') }}"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5 5L3 18v3h3l6.7-6.7a4 4 0 0 0 5-5l-2.4 2.4-3-3z"/></svg> Developer options</a>@endif
                 @endcan
                 </nav>
                 <div class="navbar-account">
