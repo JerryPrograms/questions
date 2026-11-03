@@ -30,6 +30,7 @@ class TwoFactorAuthenticationTest extends TestCase
         $this->get(route('login.verify'))
             ->assertOk()
             ->assertSee('Enter your 6-digit code')
+            ->assertSee('Trust this device for 30 days')
             ->assertDontSee($admin->email);
 
         $code = $this->sentCodeFor($admin);
@@ -43,6 +44,64 @@ class TwoFactorAuthenticationTest extends TestCase
 
         $this->assertAuthenticatedAs($admin);
         $this->assertNull(session('login_two_factor'));
+    }
+
+    public function test_trusted_device_skips_email_verification_for_thirty_days(): void
+    {
+        Mail::fake();
+        $admin = User::factory()->create(['role' => 'admin']);
+
+        $this->postJson('/login', ['email' => $admin->email, 'password' => 'password'])->assertOk();
+        $verificationResponse = $this->postJson(route('login.verify.submit'), [
+            'code' => $this->sentCodeFor($admin),
+            'trust_device' => true,
+        ])->assertOk()->assertCookie('trusted_device')->assertCookieNotExpired('trusted_device');
+
+        $trustedDeviceCookie = $verificationResponse->getCookie('trusted_device')->getValue();
+        $this->assertDatabaseHas('trusted_devices', ['user_id' => $admin->id]);
+        $this->post('/logout')->assertRedirect(route('login'));
+
+        $this->withCredentials()->withCookie('trusted_device', $trustedDeviceCookie)
+            ->postJson('/login', ['email' => $admin->email, 'password' => 'wrong-password'])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('email');
+        $this->assertGuest();
+
+        $this->postJson('/login', ['email' => $admin->email, 'password' => 'password'])
+            ->assertOk()
+            ->assertJsonPath('redirect', route('admin.imports.create'));
+
+        $this->assertAuthenticatedAs($admin);
+        Mail::assertSent(LoginVerificationCode::class, 1);
+        $this->assertDatabaseHas('audit_logs', [
+            'actor_id' => $admin->id,
+            'action' => 'auth.login_succeeded',
+            'summary' => 'Signed in successfully from a trusted device.',
+        ]);
+    }
+
+    public function test_expired_trusted_device_still_requires_email_verification(): void
+    {
+        Mail::fake();
+        $manager = User::factory()->create(['role' => 'manager']);
+
+        $this->postJson('/login', ['email' => $manager->email, 'password' => 'password'])->assertOk();
+        $verificationResponse = $this->postJson(route('login.verify.submit'), [
+            'code' => $this->sentCodeFor($manager),
+            'trust_device' => true,
+        ])->assertOk();
+        $trustedDeviceCookie = $verificationResponse->getCookie('trusted_device')->getValue();
+        $this->post('/logout')->assertRedirect(route('login'));
+
+        $this->travel(31)->days();
+        $this->withCredentials()->withCookie('trusted_device', $trustedDeviceCookie)
+            ->postJson('/login', ['email' => $manager->email, 'password' => 'password'])
+            ->assertOk()
+            ->assertJsonPath('redirect', route('login.verify'));
+
+        $this->assertGuest();
+        Mail::assertSent(LoginVerificationCode::class, 2);
+        $this->assertDatabaseMissing('trusted_devices', ['user_id' => $manager->id]);
     }
 
     public function test_code_expires_after_two_minutes_and_can_be_resent(): void

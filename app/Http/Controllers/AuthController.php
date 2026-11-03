@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Mail\LoginVerificationCode;
+use App\Models\TrustedDevice;
 use App\Models\User;
 use App\Support\AuditLog;
 use Illuminate\Contracts\View\View;
@@ -10,12 +11,18 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cookie;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
+    private const TRUSTED_DEVICE_COOKIE = 'trusted_device';
+
+    private const TRUSTED_DEVICE_MINUTES = 43200;
+
     public function showLogin(): View
     {
         return view('auth.login');
@@ -39,6 +46,16 @@ class AuthController extends Controller
         }
 
         $user = User::query()->where('email', $credentials['email'])->firstOrFail();
+
+        if ($this->isTrustedDevice($request, $user)) {
+            Auth::login($user);
+            $request->session()->forget('login_two_factor');
+            $request->session()->regenerate();
+            AuditLog::record($request, 'auth.login_succeeded', 'Signed in successfully from a trusted device.', 'user', $user->id);
+
+            return $this->authenticatedResponse($request, $user);
+        }
+
         $this->sendVerificationCode($request, $user);
         $redirect = redirect()->route('login.verify');
 
@@ -60,7 +77,10 @@ class AuthController extends Controller
 
     public function verify(Request $request): RedirectResponse|JsonResponse
     {
-        $data = $request->validate(['code' => ['required', 'digits:6']]);
+        $data = $request->validate([
+            'code' => ['required', 'digits:6'],
+            'trust_device' => ['sometimes', 'boolean'],
+        ]);
         $pending = $request->session()->get('login_two_factor');
         $user = $this->pendingUser($request);
 
@@ -89,13 +109,14 @@ class AuthController extends Controller
         Auth::login($user);
         $request->session()->forget('login_two_factor');
         $request->session()->regenerate();
+
+        if ($data['trust_device'] ?? false) {
+            $this->trustDevice($request, $user);
+        }
+
         AuditLog::record($request, 'auth.login_succeeded', 'Signed in successfully with email verification.', 'user', $user->id);
 
-        $redirect = $user->role === 'manager'
-            ? redirect()->route('manager.dashboard')
-            : redirect()->route('admin.imports.create');
-
-        return $request->expectsJson() ? response()->json(['redirect' => $redirect->getTargetUrl()]) : $redirect;
+        return $this->authenticatedResponse($request, $user);
     }
 
     public function resend(Request $request): RedirectResponse
@@ -140,6 +161,77 @@ class AuthController extends Controller
         $userId = $request->session()->get('login_two_factor.user_id');
 
         return is_int($userId) ? User::query()->find($userId) : null;
+    }
+
+    private function authenticatedResponse(Request $request, User $user): RedirectResponse|JsonResponse
+    {
+        $redirect = $user->role === 'manager'
+            ? redirect()->route('manager.dashboard')
+            : redirect()->route('admin.imports.create');
+
+        return $request->expectsJson() ? response()->json(['redirect' => $redirect->getTargetUrl()]) : $redirect;
+    }
+
+    private function isTrustedDevice(Request $request, User $user): bool
+    {
+        $cookie = $request->cookie(self::TRUSTED_DEVICE_COOKIE);
+
+        if (! is_string($cookie) || ! preg_match('/^(\d+)\|([A-Za-z0-9]+)$/', $cookie, $matches)) {
+            return false;
+        }
+
+        $trustedDevice = TrustedDevice::query()
+            ->whereKey((int) $matches[1])
+            ->where('user_id', $user->id)
+            ->first();
+
+        if ($trustedDevice === null) {
+            return false;
+        }
+
+        if ($trustedDevice->expires_at->isPast()) {
+            $trustedDevice->delete();
+
+            return false;
+        }
+
+        if (! hash_equals($trustedDevice->token_hash, hash('sha256', $matches[2]))) {
+            return false;
+        }
+
+        $trustedDevice->update(['last_used_at' => now()]);
+
+        return true;
+    }
+
+    private function trustDevice(Request $request, User $user): void
+    {
+        TrustedDevice::query()
+            ->where('user_id', $user->id)
+            ->where('expires_at', '<=', now())
+            ->delete();
+
+        $token = Str::random(64);
+        $trustedDevice = TrustedDevice::query()->create([
+            'user_id' => $user->id,
+            'token_hash' => hash('sha256', $token),
+            'expires_at' => now()->addMinutes(self::TRUSTED_DEVICE_MINUTES),
+        ]);
+
+        Cookie::queue(
+            self::TRUSTED_DEVICE_COOKIE,
+            $trustedDevice->id.'|'.$token,
+            self::TRUSTED_DEVICE_MINUTES,
+            '/',
+            null,
+            config('session.secure'),
+            true,
+            false,
+            'strict',
+        );
+        AuditLog::record($request, 'auth.trusted_device_created', 'Trusted this device for 30 days.', 'user', $user->id, null, null, [
+            'expires_at' => $trustedDevice->expires_at->toIso8601String(),
+        ]);
     }
 
     private function maskEmail(string $email): string

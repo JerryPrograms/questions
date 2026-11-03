@@ -22,6 +22,7 @@
                 <form method="POST" action="{{ route('login.verify.submit') }}" class="form-stack" data-ajax>
                     @csrf
                     <div class="field"><label for="code">Verification code</label><input class="verification-code-input" id="code" name="code" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required autofocus><span class="field-error" data-error-for="code" role="alert">@error('code'){{ $message }}@enderror</span></div>
+                    <label class="trust-device-option"><input name="trust_device" type="checkbox" value="1"> <span>Trust this device for 30 days</span></label>
                     <span class="form-error" data-form-error role="alert"></span>
                     <button class="button button-primary button-full" type="submit">Verify and sign in <span aria-hidden="true">→</span></button>
                 </form>

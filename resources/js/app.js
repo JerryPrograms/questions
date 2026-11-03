@@ -67,7 +67,7 @@ document.addEventListener('submit', async (event) => {
     form.querySelectorAll('[aria-invalid]').forEach((element) => element.removeAttribute('aria-invalid'));
 
     try {
-        const response = await fetch(form.action, {
+        const response = await fetch(form.getAttribute('action'), {
             method: form.method,
             body: new FormData(form),
             headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
