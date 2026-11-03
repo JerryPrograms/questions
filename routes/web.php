@@ -51,6 +51,7 @@ Route::middleware('auth')->group(function (): void {
         Route::get('/admin/questions', [QuestionController::class, 'index'])->name('admin.questions.index');
         Route::get('/admin/question-options', [QuestionOptionController::class, 'index'])->name('admin.question-options.index');
         Route::post('/admin/question-options', [QuestionOptionController::class, 'store'])->name('admin.question-options.store');
+        Route::post('/admin/question-options/single', [QuestionOptionController::class, 'storeSingle'])->name('admin.question-options.single');
         Route::patch('/admin/question-options/{option}', [QuestionOptionController::class, 'update'])->whereNumber('option')->name('admin.question-options.update');
         Route::delete('/admin/question-options/{option}', [QuestionOptionController::class, 'destroy'])->whereNumber('option')->name('admin.question-options.destroy');
         Route::get('/admin/questions/data', [QuestionController::class, 'data'])->name('admin.questions.data');

@@ -26,13 +26,30 @@ class QuestionOptionImportTest extends TestCase
 
         $this->actingAs($manager)->get(route('admin.question-options.index'))->assertForbidden();
         $this->actingAs($manager)->postJson(route('admin.question-options.store'))->assertForbidden();
+        $this->actingAs($manager)->postJson(route('admin.question-options.single'))->assertForbidden();
 
         $this->actingAs($admin)->get(route('admin.question-options.index'))
             ->assertOk()
             ->assertSee('Accounts &amp; payees', false)
+            ->assertSee('Create one choice')
             ->assertSee('Main Store')
             ->assertSee('North Store')
             ->assertSee('ACCOUNT, PAID TO/BY');
+
+        $this->postJson(route('admin.question-options.single'), [
+            'location' => 'Main Store',
+            'type' => 'account',
+            'value' => 'Office Supplies',
+        ])->assertCreated()
+            ->assertJsonPath('redirect', route('admin.question-options.index'));
+        $this->postJson(route('admin.question-options.single'), [
+            'location' => 'Main Store',
+            'type' => 'paid_to_by',
+            'value' => 'Preferred Supplier',
+        ])->assertCreated();
+
+        $this->assertDatabaseHas('accounts', ['account' => 'Office Supplies']);
+        $this->assertDatabaseHas('location_question_options', ['location' => 'Main Store', 'type' => 'paid_to_by', 'value' => 'Preferred Supplier']);
 
         $choices = "ACCOUNT,PAID TO/BY\nOffice Supplies,Preferred Supplier\nTravel Expense,Local Vendor\n";
         $this->postJson(route('admin.question-options.store'), [

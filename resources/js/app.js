@@ -264,7 +264,7 @@ document.querySelectorAll('[data-server-table]').forEach((table) => {
                     const answers = row.answers.length === 0 && answer !== null
                         ? [{ answer, answered_by_name: row.answered_by_name, answered_at: row.answered_at }]
                         : row.answers;
-                    const description = row.description === null ? '' : `<p class="answer-description" title="${textRenderer.display(row.description)}">${textRenderer.display(row.description)}</p>`;
+                    const description = row.description === null ? '' : `<p class="answer-description" title="${textRenderer.display(row.description)}"><span class="answer-description-icon" aria-hidden="true">i</span><strong>Memo/Description:</strong> ${textRenderer.display(row.description)}</p>`;
                     answerHistories.set(Number(row.id), { answers, location: row.location, description: row.description });
 
                     if (row.archived_at !== null) {

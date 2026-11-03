@@ -21,7 +21,7 @@ Route::prefix('v1')->group(function (): void {
 
         Route::post('/question-options/import', [QuestionOptionController::class, 'apiBulkStore']);
         Route::get('/question-options', [QuestionOptionController::class, 'apiIndex']);
-        Route::post('/question-options', [QuestionOptionController::class, 'apiStore']);
+        Route::post('/question-options', [QuestionOptionController::class, 'storeSingle']);
         Route::get('/question-options/{option}', [QuestionOptionController::class, 'apiShow'])->whereNumber('option');
         Route::patch('/question-options/{option}', [QuestionOptionController::class, 'update'])->whereNumber('option');
         Route::delete('/question-options/{option}', [QuestionOptionController::class, 'destroy'])->whereNumber('option');

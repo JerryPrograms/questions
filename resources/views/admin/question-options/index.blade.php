@@ -8,8 +8,17 @@
     @if (session('status'))<div class="success-message" role="status">{{ session('status') }}</div>@endif
 
     <div class="option-management-grid">
-        <section class="panel import-panel option-upload-panel" aria-labelledby="option-upload-heading" data-location-form>
-            <div class="panel-heading"><h3 id="option-upload-heading">Upload location choices</h3><span class="panel-note">Excel / CSV</span></div>
+        <section class="panel import-panel option-upload-panel" aria-labelledby="option-management-heading" data-location-form>
+            <div class="panel-heading"><h3 id="option-management-heading">Create one choice</h3><span class="panel-note">Account / payee</span></div>
+            <form method="POST" action="{{ route('admin.question-options.single') }}" class="form-stack single-option-form" data-ajax>
+                @csrf
+                <div class="field"><label for="single-option-location">Location</label><select id="single-option-location" name="location" required><option value="">Select a location</option>@foreach($locations as $location)<option value="{{ $location }}">{{ $location }}</option>@endforeach</select><span class="field-error" data-error-for="location" role="alert"></span></div>
+                <div class="field"><label for="single-option-type">Choice type</label><select id="single-option-type" name="type" required><option value="account">Account</option><option value="paid_to_by">Paid to/by</option></select><span class="field-error" data-error-for="type" role="alert"></span></div>
+                <div class="field"><label for="single-option-value">Name</label><input id="single-option-value" name="value" maxlength="255" required><span class="field-error" data-error-for="value" role="alert"></span></div>
+                <span class="form-error" data-form-error role="alert"></span>
+                <button class="button button-primary" type="submit" @disabled($locations->isEmpty())>Create choice <span aria-hidden="true">→</span></button>
+            </form>
+            <div class="panel-heading"><h3>Upload location choices</h3><span class="panel-note">Excel / CSV</span></div>
             <p class="panel-description">Use two columns in this exact order. Either value may be blank, but every row must contain at least one value:</p>
             <p class="panel-description"><strong>ACCOUNT, PAID TO/BY</strong></p>
             <form method="POST" action="{{ route('admin.question-options.store') }}" enctype="multipart/form-data" class="form-stack" data-ajax>

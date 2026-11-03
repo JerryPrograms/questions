@@ -54,7 +54,7 @@ class QuestionOptionController extends Controller
         return response()->json(['data' => $questionOption]);
     }
 
-    public function apiStore(Request $request): JsonResponse
+    public function storeSingle(Request $request): JsonResponse
     {
         $data = $request->validate([
             'location' => ['required', 'string', 'max:255', Rule::exists('accounting_entries', 'location')],
@@ -88,10 +88,19 @@ class QuestionOptionController extends Controller
             return $optionId;
         });
 
-        return response()->json([
+        $response = [
             'data' => DB::table('location_question_options')->find($optionId),
             'created' => $created,
-        ], $created ? 201 : 200);
+        ];
+
+        if (! $request->is('api/*')) {
+            $message = ($data['type'] === 'account' ? 'Account' : 'Paid to/by').' '.($created ? 'created.' : 'already exists.');
+            $request->session()->flash('status', $message);
+
+            return response()->json($response + ['redirect' => route('admin.question-options.index'), 'message' => $message], $created ? 201 : 200);
+        }
+
+        return response()->json($response, $created ? 201 : 200);
     }
 
     public function apiBulkStore(Request $request): JsonResponse
