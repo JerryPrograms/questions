@@ -35,8 +35,8 @@ class ApiCrudTest extends TestCase
         $this->getJson('/api/v1/imports')->assertUnauthorized();
 
         $admin = User::factory()->create(['role' => 'admin']);
-        $this->withBasicAuth($admin->email, 'password')
-            ->postJson('/api/v1/imports', self::TRANSACTIONS)
+        $this->authenticateApi($admin);
+        $this->postJson('/api/v1/imports', self::TRANSACTIONS)
             ->assertCreated()
             ->assertJsonPath('created', true)
             ->assertJsonPath('data.row_count', 1);
@@ -90,20 +90,56 @@ class ApiCrudTest extends TestCase
         Storage::disk('local')->assertMissing('question-details/1.pdf');
     }
 
-    public function test_manager_cannot_use_admin_api(): void
+    public function test_only_current_admins_can_create_and_use_api_tokens(): void
     {
         $manager = User::factory()->create(['role' => 'manager']);
+        $admin = User::factory()->create(['role' => 'admin']);
 
-        $this->withBasicAuth($manager->email, 'password')
-            ->getJson('/api/v1/imports')
-            ->assertForbidden();
+        $this->postJson('/api/v1/auth/token', [
+            'email' => $manager->email,
+            'password' => 'password',
+        ])->assertUnauthorized();
+        $this->assertDatabaseCount('api_tokens', 0);
+
+        $this->authenticateApi($admin);
+        $admin->forceFill(['role' => 'manager'])->save();
+        $this->getJson('/api/v1/imports')->assertForbidden();
+    }
+
+    public function test_admin_can_create_and_revoke_a_hashed_api_token(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin']);
+
+        $this->postJson('/api/v1/auth/token', [
+            'email' => $admin->email,
+            'password' => 'wrong-password',
+        ])->assertUnauthorized();
+
+        $token = $this->authenticateApi($admin);
+        $this->assertDatabaseMissing('api_tokens', ['token_hash' => $token]);
+        $this->getJson('/api/v1/imports')->assertOk();
+        $this->deleteJson('/api/v1/auth/token')->assertOk();
+        $this->assertDatabaseCount('api_tokens', 0);
+        $this->getJson('/api/v1/imports')->assertUnauthorized();
+    }
+
+    public function test_expired_api_tokens_are_rejected_and_deleted(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin']);
+        $this->authenticateApi($admin);
+
+        $this->travel(31)->days();
+        $this->getJson('/api/v1/imports')
+            ->assertUnauthorized()
+            ->assertJsonPath('message', 'API token has expired.');
+        $this->assertDatabaseCount('api_tokens', 0);
     }
 
     public function test_question_option_api_supports_crud_and_idempotent_uploads(): void
     {
         $admin = User::factory()->create(['role' => 'admin']);
-        $this->withBasicAuth($admin->email, 'password')
-            ->postJson('/api/v1/imports', self::TRANSACTIONS)
+        $this->authenticateApi($admin);
+        $this->postJson('/api/v1/imports', self::TRANSACTIONS)
             ->assertCreated();
 
         $this->postJson('/api/v1/question-options', [
@@ -149,5 +185,19 @@ class ApiCrudTest extends TestCase
         $this->deleteJson("/api/v1/question-options/{$optionId}")->assertNoContent();
 
         $this->assertDatabaseMissing('location_question_options', ['id' => $optionId]);
+    }
+
+    private function authenticateApi(User $admin): string
+    {
+        $response = $this->postJson('/api/v1/auth/token', [
+            'email' => $admin->email,
+            'password' => 'password',
+        ])->assertCreated()
+            ->assertJsonPath('token_type', 'Bearer');
+        $token = $response->json('access_token');
+        $this->assertIsString($token);
+        $this->withToken($token);
+
+        return $token;
     }
 }

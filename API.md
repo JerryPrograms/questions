@@ -8,15 +8,44 @@ All API write endpoints accept `application/json`. Do not send Excel, CSV, multi
 
 ## Authentication
 
-Use HTTP Basic authentication with an administrator email address and password. Always call the API over HTTPS outside local development.
+First exchange an administrator email address and password for a 30-day access token. Manager credentials are rejected. Always call the API over HTTPS outside local development.
 
 ```bash
-curl --user 'admin@example.com:password' \
+curl -X POST \
+  -H 'Accept: application/json' \
+  -H 'Content-Type: application/json' \
+  --data '{"email":"admin@example.com","password":"password"}' \
+  https://example.com/api/v1/auth/token
+```
+
+The response contains the only copy of the plaintext token:
+
+```json
+{
+  "token_type": "Bearer",
+  "access_token": "1|TOKEN_VALUE",
+  "expires_at": "2026-12-03T01:10:32+00:00"
+}
+```
+
+Store it securely and send it as a Bearer token on every API request:
+
+```bash
+curl -H 'Authorization: Bearer 1|TOKEN_VALUE' \
   -H 'Accept: application/json' \
   https://example.com/api/v1/imports
 ```
 
-Unauthenticated requests return `401`. Authenticated non-admin users return `403`. Validation failures return `422` with Laravel's standard `message` and `errors` fields.
+To revoke the current token:
+
+```bash
+curl -X DELETE \
+  -H 'Authorization: Bearer 1|TOKEN_VALUE' \
+  -H 'Accept: application/json' \
+  https://example.com/api/v1/auth/token
+```
+
+Tokens are stored as one-way hashes and expire after 30 days. The token endpoint is limited to five attempts per minute. Missing, invalid, expired, or revoked tokens return `401`. A token whose user is no longer an administrator returns `403`. Validation failures return `422` with Laravel's standard `message` and `errors` fields.
 
 ## Imports
 
@@ -41,7 +70,7 @@ The response uses Laravel pagination fields, including `data`, `current_page`, `
 Send JSON containing a stable `import_key` and the transaction rows. No file is sent to the API. Reuse the same `import_key` when updating or retrying the same batch.
 
 ```bash
-curl --user 'admin@example.com:password' \
+curl -H 'Authorization: Bearer 1|TOKEN_VALUE' \
   -X POST \
   -H 'Accept: application/json' \
   -H 'Content-Type: application/json' \
@@ -156,7 +185,7 @@ Query parameters:
 | `page` | Page number. |
 
 ```bash
-curl --user 'admin@example.com:password' \
+curl -H 'Authorization: Bearer 1|TOKEN_VALUE' \
   -H 'Accept: application/json' \
   'https://example.com/api/v1/accounting-entries?location=Main%20Store&answered=1&per_page=50'
 ```
@@ -258,7 +287,7 @@ Returns `204`. The option is removed only from its location.
 Send JSON arrays. No file is sent to this endpoint.
 
 ```bash
-curl --user 'admin@example.com:password' \
+curl -H 'Authorization: Bearer 1|TOKEN_VALUE' \
   -X POST \
   -H 'Accept: application/json' \
   -H 'Content-Type: application/json' \
@@ -283,7 +312,7 @@ API creates, upserts, updates, bulk operations, and deletes are recorded in Acti
 | `200` | Successful read, update, or idempotent upsert. |
 | `201` | New import or option created. |
 | `204` | Resource deleted successfully. |
-| `401` | Basic authentication is missing or invalid. |
+| `401` | Bearer token is missing, invalid, expired, or revoked. |
 | `403` | The authenticated account is not an administrator. |
 | `404` | The requested resource does not exist. |
 | `422` | Request validation failed. |
