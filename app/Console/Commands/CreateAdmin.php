@@ -9,7 +9,7 @@ use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rules\Password;
 
-#[Signature('app:create-admin {name} {email}')]
+#[Signature('app:create-admin {name} {email} {--super : Create a super administrator}')]
 #[Description('Create an administrator account')]
 class CreateAdmin extends Command
 {
@@ -35,10 +35,10 @@ class CreateAdmin extends Command
         }
 
         $user = User::create($validator->validated());
-        $user->role = 'admin';
+        $user->role = $this->option('super') ? 'super_admin' : 'admin';
         $user->save();
 
-        $this->info('Admin account created.');
+        $this->info($this->option('super') ? 'Super admin account created.' : 'Admin account created.');
 
         return self::SUCCESS;
     }

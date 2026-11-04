@@ -15,7 +15,7 @@ class AuditLogController extends Controller
             'search' => ['nullable', 'string', 'max:255'],
             'action' => ['nullable', 'string', 'max:255', Rule::exists('audit_logs', 'action')],
             'actor' => ['nullable', 'integer', Rule::exists('audit_logs', 'actor_id')],
-            'role' => ['nullable', Rule::in(['admin', 'manager'])],
+            'role' => ['nullable', Rule::in(['super_admin', 'admin', 'manager'])],
             'location' => ['nullable', 'string', 'max:255', Rule::exists('audit_logs', 'location')],
             'subject_type' => ['nullable', 'string', 'max:255', Rule::exists('audit_logs', 'subject_type')],
             'subject_id' => ['nullable', 'integer', 'min:1'],

@@ -24,6 +24,7 @@ Route::middleware('auth')->group(function (): void {
 
     Route::get('/dashboard', function () {
         return match (auth()->user()->role) {
+            'super_admin',
             'admin' => redirect()->route('admin.dashboard'),
             'manager' => redirect()->route('manager.dashboard'),
             default => abort(403),
@@ -33,8 +34,6 @@ Route::middleware('auth')->group(function (): void {
     Route::middleware('can:admin')->group(function (): void {
         Route::get('/admin', [ManagerController::class, 'index'])->name('admin.dashboard');
         Route::get('/admin/logs', [AuditLogController::class, 'index'])->name('admin.audit-logs.index');
-        Route::get('/admin/developer-options', [DeveloperOptionController::class, 'index'])->name('admin.developer-options.index');
-        Route::post('/admin/developer-options/run', [DeveloperOptionController::class, 'run'])->name('admin.developer-options.run');
         Route::get('/admin/dashboard/data', [ManagerController::class, 'dashboardData'])->name('admin.dashboard.data');
         Route::post('/admin/managers', [ManagerController::class, 'store'])->name('admin.managers.store');
         Route::get('/admin/manager-locations', [ManagerController::class, 'locations'])->name('admin.manager-locations.index');
@@ -65,6 +64,13 @@ Route::middleware('auth')->group(function (): void {
         Route::post('/admin/questions/bulk-archive', [QuestionController::class, 'bulkArchive'])->name('admin.questions.bulk-archive');
         Route::post('/admin/questions/{entry}/archive', [QuestionController::class, 'archive'])->whereNumber('entry')->name('admin.questions.archive');
         Route::post('/admin/questions/{entry}/status', [QuestionController::class, 'updateStatus'])->whereNumber('entry')->name('admin.questions.status');
+    });
+
+    Route::middleware('can:super-admin')->group(function (): void {
+        Route::post('/admin/admins', [ManagerController::class, 'storeAdmin'])->name('admin.admins.store');
+        Route::get('/admin/developer-options', [DeveloperOptionController::class, 'index'])->name('admin.developer-options.index');
+        Route::post('/admin/developer-options/run', [DeveloperOptionController::class, 'run'])->name('admin.developer-options.run');
+        Route::put('/admin/developer-options/two-factor', [DeveloperOptionController::class, 'updateTwoFactor'])->name('admin.developer-options.two-factor.update');
     });
 
     Route::middleware('can:manager')->group(function (): void {

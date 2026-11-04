@@ -1,6 +1,6 @@
 @php($locationTitle = $allLocations ? 'All locations' : (count($locations) === 1 ? $locations[0] : count($locations).' locations'))
 @php($selection = $allLocations ? ['all' => 1] : ['locations' => $locations])
-@php($isAdmin = auth()->user()->role === 'admin')
+@php($isAdmin = auth()->user()->can('admin'))
 @extends('layouts.portal')
 
 @section('title', 'Questions — '.$locationTitle)

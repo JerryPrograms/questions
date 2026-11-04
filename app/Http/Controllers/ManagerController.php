@@ -190,6 +190,34 @@ class ManagerController extends Controller
         return redirect($redirect)->with('status', 'Manager account created.');
     }
 
+    public function storeAdmin(Request $request): RedirectResponse|JsonResponse
+    {
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'email' => ['required', 'email', 'max:255', 'unique:users,email'],
+            'password' => ['required', 'confirmed', Password::min(12)->letters()->numbers()],
+        ]);
+
+        unset($data['password_confirmation']);
+        $admin = User::create($data);
+        $admin->role = 'admin';
+        $admin->save();
+        AuditLog::record($request, 'admin.created', 'Created admin '.$admin->name.'.', 'user', $admin->id, null, null, [
+            'name' => $admin->name,
+            'email' => $admin->email,
+            'role' => $admin->role,
+        ]);
+        $redirect = route('admin.manager-locations.index');
+
+        if ($request->expectsJson()) {
+            $request->session()->flash('status', 'Admin account created.');
+
+            return response()->json(['redirect' => $redirect, 'message' => 'Admin account created.']);
+        }
+
+        return redirect($redirect)->with('status', 'Admin account created.');
+    }
+
     public function updateLocations(Request $request, User $manager): RedirectResponse|JsonResponse
     {
         abort_unless($manager->role === 'manager', 404);

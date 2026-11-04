@@ -429,7 +429,7 @@ class QuestionController extends Controller
 
     private function authorizeLocation(Request $request, string $location): void
     {
-        if ($request->user()->role === 'admin') {
+        if ($request->user()->can('admin')) {
             return;
         }
 

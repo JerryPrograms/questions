@@ -1,5 +1,5 @@
 @extends('layouts.portal')
-@php($isAdmin = auth()->user()->role === 'admin')
+@php($isAdmin = auth()->user()->can('admin'))
 
 @section('title', 'Overview')
 @section('content-class', 'content-wide')

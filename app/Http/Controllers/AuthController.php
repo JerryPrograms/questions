@@ -12,6 +12,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cookie;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
@@ -46,6 +47,15 @@ class AuthController extends Controller
         }
 
         $user = User::query()->where('email', $credentials['email'])->firstOrFail();
+
+        if (! $this->twoFactorEnabled()) {
+            Auth::login($user);
+            $request->session()->forget('login_two_factor');
+            $request->session()->regenerate();
+            AuditLog::record($request, 'auth.login_succeeded', 'Signed in successfully with two-factor authentication disabled.', 'user', $user->id);
+
+            return $this->authenticatedResponse($request, $user);
+        }
 
         if ($this->isTrustedDevice($request, $user)) {
             Auth::login($user);
@@ -161,6 +171,11 @@ class AuthController extends Controller
         $userId = $request->session()->get('login_two_factor.user_id');
 
         return is_int($userId) ? User::query()->find($userId) : null;
+    }
+
+    private function twoFactorEnabled(): bool
+    {
+        return DB::table('system_settings')->where('key', 'two_factor_enabled')->value('value') !== '0';
     }
 
     private function authenticatedResponse(Request $request, User $user): RedirectResponse|JsonResponse

@@ -21,7 +21,7 @@ class ApiAuthController extends Controller
         ]);
         $user = User::query()->where('email', $credentials['email'])->first();
 
-        if ($user === null || $user->role !== 'admin' || ! Hash::check($credentials['password'], $user->password)) {
+        if ($user === null || ! $user->can('admin') || ! Hash::check($credentials['password'], $user->password)) {
             AuditLog::record($request, 'api.token_failed', 'Failed API token request.', 'authentication', null, null, null, [
                 'email' => $credentials['email'],
             ]);

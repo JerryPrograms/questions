@@ -8,6 +8,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Throwable;
 
@@ -36,7 +37,9 @@ class DeveloperOptionController extends Controller
     {
         $this->ensureEnabled();
 
-        return view('admin.developer-options.index');
+        return view('admin.developer-options.index', [
+            'twoFactorEnabled' => $this->twoFactorEnabled(),
+        ]);
     }
 
     public function run(Request $request): RedirectResponse|JsonResponse
@@ -77,9 +80,41 @@ class DeveloperOptionController extends Controller
         }
     }
 
+    public function updateTwoFactor(Request $request): RedirectResponse|JsonResponse
+    {
+        $this->ensureEnabled();
+        $data = $request->validate([
+            'enabled' => ['required', 'boolean'],
+        ]);
+        $previousValue = $this->twoFactorEnabled();
+        $enabled = (bool) $data['enabled'];
+
+        DB::table('system_settings')->updateOrInsert(
+            ['key' => 'two_factor_enabled'],
+            ['value' => $enabled ? '1' : '0'],
+        );
+        AuditLog::record($request, 'developer.two_factor_updated', 'Two-factor authentication '.($enabled ? 'enabled.' : 'disabled.'), 'system_setting', null, null, [
+            'enabled' => $previousValue,
+        ], [
+            'enabled' => $enabled,
+        ]);
+
+        $message = 'Two-factor authentication '.($enabled ? 'enabled.' : 'disabled.');
+        $redirect = redirect()->route('admin.developer-options.index');
+
+        return $request->expectsJson()
+            ? response()->json(['redirect' => $redirect->getTargetUrl(), 'message' => $message])
+            : $redirect->with('status', $message);
+    }
+
     private function ensureEnabled(): void
     {
         abort_unless(config('app.devoption'), 404);
+    }
+
+    private function twoFactorEnabled(): bool
+    {
+        return DB::table('system_settings')->where('key', 'two_factor_enabled')->value('value') !== '0';
     }
 
     private function successResponse(Request $request, string $message, string $output): RedirectResponse|JsonResponse

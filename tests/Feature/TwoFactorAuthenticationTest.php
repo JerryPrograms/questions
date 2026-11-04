@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Mail\LoginVerificationCode;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
 use Tests\TestCase;
@@ -12,6 +13,26 @@ use Tests\TestCase;
 class TwoFactorAuthenticationTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_login_skips_email_verification_when_two_factor_is_disabled(): void
+    {
+        Mail::fake();
+        DB::table('system_settings')->where('key', 'two_factor_enabled')->update(['value' => '0']);
+        $admin = User::factory()->create(['role' => 'admin']);
+
+        $this->postJson('/login', ['email' => $admin->email, 'password' => 'wrong-password'])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('email');
+        $this->assertGuest();
+
+        $this->postJson('/login', ['email' => $admin->email, 'password' => 'password'])
+            ->assertOk()
+            ->assertJsonPath('redirect', route('admin.imports.create'));
+
+        $this->assertAuthenticatedAs($admin);
+        $this->assertNull(session('login_two_factor'));
+        Mail::assertNothingSent();
+    }
 
     public function test_valid_credentials_require_emailed_code_before_login(): void
     {

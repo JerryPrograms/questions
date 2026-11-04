@@ -292,6 +292,38 @@ class PortalAccessTest extends TestCase
         $this->assertTrue(Hash::check($data['password'], $created->password));
     }
 
+    public function test_only_super_admins_can_create_admins(): void
+    {
+        $data = [
+            'name' => 'New Admin',
+            'email' => 'new-admin@example.com',
+            'password' => 'long-password-123',
+            'password_confirmation' => 'long-password-123',
+        ];
+
+        $admin = User::factory()->create(['role' => 'admin']);
+        $this->actingAs($admin)->postJson(route('admin.admins.store'), $data)->assertForbidden();
+
+        $superAdmin = User::factory()->create(['role' => 'super_admin']);
+        $this->actingAs($superAdmin)->get(route('admin.manager-locations.index'))
+            ->assertOk()
+            ->assertSee(route('admin.admins.store'));
+        $this->postJson(route('admin.admins.store'), $data)->assertOk();
+
+        $created = User::where('email', $data['email'])->firstOrFail();
+        $this->assertSame('admin', $created->role);
+        $this->assertTrue(Hash::check($data['password'], $created->password));
+    }
+
+    public function test_super_admin_inherits_admin_access(): void
+    {
+        $superAdmin = User::factory()->create(['role' => 'super_admin']);
+
+        $this->actingAs($superAdmin)->get('/dashboard')->assertRedirect(route('admin.dashboard'));
+        $this->get(route('admin.dashboard'))->assertOk();
+        $this->get(route('manager.dashboard'))->assertForbidden();
+    }
+
     public function test_admin_can_answer_selected_or_all_pending_questions(): void
     {
         $admin = User::factory()->create(['role' => 'admin']);
@@ -439,6 +471,16 @@ class PortalAccessTest extends TestCase
         $admin = User::where('email', 'admin@example.com')->firstOrFail();
         $this->assertSame('admin', $admin->role);
         $this->assertTrue(Hash::check('long-password-123', $admin->password));
+    }
+
+    public function test_super_admin_can_be_created_from_the_console(): void
+    {
+        $this->artisan('app:create-admin', ['name' => 'Super Admin', 'email' => 'super@example.com', '--super' => true])
+            ->expectsQuestion('Password', 'long-password-123')
+            ->expectsQuestion('Confirm password', 'long-password-123')
+            ->assertSuccessful();
+
+        $this->assertDatabaseHas('users', ['email' => 'super@example.com', 'role' => 'super_admin']);
     }
 
     private function loginWithTwoFactor(User $user): TestResponse

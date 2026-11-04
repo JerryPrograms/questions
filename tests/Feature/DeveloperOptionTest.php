@@ -15,25 +15,31 @@ class DeveloperOptionTest extends TestCase
     public function test_developer_options_are_hidden_and_unreachable_when_disabled(): void
     {
         config(['app.devoption' => false]);
-        $admin = User::factory()->create(['role' => 'admin']);
+        $superAdmin = User::factory()->create(['role' => 'super_admin']);
 
-        $this->actingAs($admin)->get(route('admin.imports.create'))
+        $this->actingAs($superAdmin)->get(route('admin.imports.create'))
             ->assertOk()
             ->assertDontSee('Developer options');
         $this->get(route('admin.developer-options.index'))->assertNotFound();
         $this->postJson(route('admin.developer-options.run'), ['action' => 'migrate'])->assertNotFound();
     }
 
-    public function test_only_admins_can_view_enabled_developer_options(): void
+    public function test_only_super_admins_can_view_enabled_developer_options(): void
     {
         config(['app.devoption' => true]);
         $manager = User::factory()->create(['role' => 'manager']);
         $admin = User::factory()->create(['role' => 'admin']);
+        $superAdmin = User::factory()->create(['role' => 'super_admin']);
 
         $this->actingAs($manager)->get(route('admin.developer-options.index'))->assertForbidden();
-        $this->actingAs($admin)->get(route('admin.developer-options.index'))
+        $this->actingAs($admin)->get(route('admin.imports.create'))->assertDontSee('Developer options');
+        $this->get(route('admin.developer-options.index'))->assertForbidden();
+        $this->postJson(route('admin.developer-options.run'), ['action' => 'cache-clear'])->assertForbidden();
+        $this->putJson(route('admin.developer-options.two-factor.update'), ['enabled' => false])->assertForbidden();
+        $this->actingAs($superAdmin)->get(route('admin.developer-options.index'))
             ->assertOk()
             ->assertSee('Developer options')
+            ->assertSee('Email two-factor authentication')
             ->assertSee('php artisan migrate')
             ->assertSee('php artisan cache:clear')
             ->assertSee('php artisan db:seed');
@@ -42,19 +48,19 @@ class DeveloperOptionTest extends TestCase
 
     /** @param array<string, bool> $parameters */
     #[DataProvider('developerActions')]
-    public function test_admin_can_run_allowlisted_developer_commands(string $action, string $command, array $parameters): void
+    public function test_super_admin_can_run_allowlisted_developer_commands(string $action, string $command, array $parameters): void
     {
         config(['app.devoption' => true]);
-        $admin = User::factory()->create(['role' => 'admin']);
+        $superAdmin = User::factory()->create(['role' => 'super_admin']);
         Artisan::shouldReceive('call')->once()->with($command, $parameters)->andReturn(0);
         Artisan::shouldReceive('output')->once()->andReturn('Command completed.');
 
-        $this->actingAs($admin)->postJson(route('admin.developer-options.run'), ['action' => $action])
+        $this->actingAs($superAdmin)->postJson(route('admin.developer-options.run'), ['action' => $action])
             ->assertOk()
             ->assertJsonPath('redirect', route('admin.developer-options.index'));
 
         $this->assertDatabaseHas('audit_logs', [
-            'actor_id' => $admin->id,
+            'actor_id' => $superAdmin->id,
             'action' => 'developer.command_succeeded',
             'subject_type' => 'developer_command',
         ]);
@@ -63,11 +69,27 @@ class DeveloperOptionTest extends TestCase
     public function test_arbitrary_developer_commands_are_rejected(): void
     {
         config(['app.devoption' => true]);
-        $admin = User::factory()->create(['role' => 'admin']);
+        $superAdmin = User::factory()->create(['role' => 'super_admin']);
 
-        $this->actingAs($admin)->postJson(route('admin.developer-options.run'), ['action' => 'config:show'])
+        $this->actingAs($superAdmin)->postJson(route('admin.developer-options.run'), ['action' => 'config:show'])
             ->assertUnprocessable()
             ->assertJsonValidationErrors('action');
+    }
+
+    public function test_super_admin_can_toggle_two_factor_authentication(): void
+    {
+        config(['app.devoption' => true]);
+        $superAdmin = User::factory()->create(['role' => 'super_admin']);
+
+        $this->actingAs($superAdmin)->putJson(route('admin.developer-options.two-factor.update'), ['enabled' => false])
+            ->assertOk()
+            ->assertJsonPath('message', 'Two-factor authentication disabled.');
+
+        $this->assertDatabaseHas('system_settings', ['key' => 'two_factor_enabled', 'value' => '0']);
+        $this->assertDatabaseHas('audit_logs', [
+            'actor_id' => $superAdmin->id,
+            'action' => 'developer.two_factor_updated',
+        ]);
     }
 
     /** @return array<string, array{string, string, array<string, bool>}> */
