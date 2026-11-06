@@ -67,7 +67,10 @@ Route::middleware('auth')->group(function (): void {
     });
 
     Route::middleware('can:super-admin')->group(function (): void {
+        Route::get('/admin/admins', [ManagerController::class, 'admins'])->name('admin.admins.index');
         Route::post('/admin/admins', [ManagerController::class, 'storeAdmin'])->name('admin.admins.store');
+        Route::patch('/admin/admins/{admin}', [ManagerController::class, 'updateAdmin'])->whereNumber('admin')->name('admin.admins.update');
+        Route::delete('/admin/admins/{admin}', [ManagerController::class, 'destroyAdmin'])->whereNumber('admin')->name('admin.admins.destroy');
         Route::get('/admin/developer-options', [DeveloperOptionController::class, 'index'])->name('admin.developer-options.index');
         Route::post('/admin/developer-options/run', [DeveloperOptionController::class, 'run'])->name('admin.developer-options.run');
         Route::put('/admin/developer-options/two-factor', [DeveloperOptionController::class, 'updateTwoFactor'])->name('admin.developer-options.two-factor.update');

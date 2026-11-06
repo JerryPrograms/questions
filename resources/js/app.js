@@ -161,7 +161,7 @@ document.querySelectorAll('[data-server-table]').forEach((table) => {
                 data: 'location',
                 orderable: false,
                 searchable: false,
-                render: (location) => `<input type="checkbox" data-location-select value="${textRenderer.display(location)}" aria-label="Select ${textRenderer.display(location)}">`,
+                render: (location) => `<label class="checkbox-hit"><input type="checkbox" data-location-select value="${textRenderer.display(location)}" aria-label="Select ${textRenderer.display(location)}"></label>`,
             },
             { data: 'location', render: textRenderer },
             { data: 'total_questions' },
@@ -197,8 +197,8 @@ document.querySelectorAll('[data-server-table]').forEach((table) => {
                 orderable: false,
                 searchable: false,
                 render: (id, type, row) => row.archived_at === null
-                    ? `<input type="checkbox" data-question-select value="${Number(id)}" aria-label="Select question">`
-                    : '<input type="checkbox" disabled aria-label="Archived question cannot be selected">',
+                    ? `<label class="checkbox-hit"><input type="checkbox" data-question-select value="${Number(id)}" aria-label="Select question"></label>`
+                    : '<label class="checkbox-hit"><input type="checkbox" disabled aria-label="Archived question cannot be selected"></label>',
             },
             {
                 data: null,

@@ -292,7 +292,7 @@ class PortalAccessTest extends TestCase
         $this->assertTrue(Hash::check($data['password'], $created->password));
     }
 
-    public function test_only_super_admins_can_create_admins(): void
+    public function test_only_super_admins_can_manage_admins(): void
     {
         $data = [
             'name' => 'New Admin',
@@ -302,17 +302,57 @@ class PortalAccessTest extends TestCase
         ];
 
         $admin = User::factory()->create(['role' => 'admin']);
+        $this->actingAs($admin)->get(route('admin.admins.index'))->assertForbidden();
         $this->actingAs($admin)->postJson(route('admin.admins.store'), $data)->assertForbidden();
 
         $superAdmin = User::factory()->create(['role' => 'super_admin']);
-        $this->actingAs($superAdmin)->get(route('admin.manager-locations.index'))
+        $this->actingAs($superAdmin)->get(route('admin.admins.index'))
             ->assertOk()
             ->assertSee(route('admin.admins.store'));
-        $this->postJson(route('admin.admins.store'), $data)->assertOk();
+        $this->postJson(route('admin.admins.store'), $data)
+            ->assertOk()
+            ->assertJsonPath('redirect', route('admin.admins.index'));
 
         $created = User::where('email', $data['email'])->firstOrFail();
         $this->assertSame('admin', $created->role);
         $this->assertTrue(Hash::check($data['password'], $created->password));
+
+        $this->patchJson(route('admin.admins.update', $created), [
+            'name' => 'Updated Admin',
+            'email' => 'updated-admin@example.com',
+            'password' => '',
+            'password_confirmation' => '',
+        ])->assertOk();
+        $this->assertDatabaseHas('users', [
+            'id' => $created->id,
+            'name' => 'Updated Admin',
+            'email' => 'updated-admin@example.com',
+            'role' => 'admin',
+        ]);
+        $this->assertTrue(Hash::check($data['password'], $created->fresh()->password));
+
+        $this->deleteJson(route('admin.admins.destroy', $created))->assertOk();
+        $this->assertDatabaseMissing('users', ['id' => $created->id]);
+        $this->patchJson(route('admin.admins.update', $superAdmin), $data)->assertNotFound();
+    }
+
+    public function test_admin_with_imported_files_cannot_be_deleted(): void
+    {
+        $superAdmin = User::factory()->create(['role' => 'super_admin']);
+        $admin = User::factory()->create(['role' => 'admin']);
+        DB::table('imports')->insert([
+            'uploaded_by' => $admin->id,
+            'file_name' => 'owned.csv',
+            'sha256' => str_repeat('a', 64),
+            'row_count' => 1,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->actingAs($superAdmin)->deleteJson(route('admin.admins.destroy', $admin))
+            ->assertUnprocessable()
+            ->assertJsonPath('message', 'This admin cannot be deleted because they own imported files.');
+        $this->assertDatabaseHas('users', ['id' => $admin->id]);
     }
 
     public function test_super_admin_inherits_admin_access(): void

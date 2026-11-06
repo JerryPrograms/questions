@@ -207,7 +207,7 @@ class ManagerController extends Controller
             'email' => $admin->email,
             'role' => $admin->role,
         ]);
-        $redirect = route('admin.manager-locations.index');
+        $redirect = route('admin.admins.index');
 
         if ($request->expectsJson()) {
             $request->session()->flash('status', 'Admin account created.');
@@ -216,6 +216,56 @@ class ManagerController extends Controller
         }
 
         return redirect($redirect)->with('status', 'Admin account created.');
+    }
+
+    public function admins(): View
+    {
+        return view('admin.admins.index', [
+            'admins' => User::query()->where('role', 'admin')->orderBy('name')->get(),
+        ]);
+    }
+
+    public function updateAdmin(Request $request, User $admin): RedirectResponse|JsonResponse
+    {
+        abort_unless($admin->role === 'admin', 404);
+
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')->ignore($admin)],
+            'password' => ['nullable', 'confirmed', Password::min(12)->letters()->numbers()],
+        ]);
+        $previous = $admin->only(['name', 'email']);
+
+        if (empty($data['password'])) {
+            unset($data['password']);
+        }
+
+        $admin->update($data);
+        AuditLog::record($request, 'admin.updated', 'Updated admin '.$admin->name.'.', 'user', $admin->id, null, $previous, $admin->only(['name', 'email']));
+        $redirect = route('admin.admins.index');
+
+        return $request->expectsJson()
+            ? response()->json(['redirect' => $redirect, 'message' => 'Admin account updated.'])
+            : redirect($redirect)->with('status', 'Admin account updated.');
+    }
+
+    public function destroyAdmin(Request $request, User $admin): RedirectResponse|JsonResponse
+    {
+        abort_unless($admin->role === 'admin', 404);
+
+        if (DB::table('imports')->where('uploaded_by', $admin->id)->exists()) {
+            return $request->expectsJson()
+                ? response()->json(['message' => 'This admin cannot be deleted because they own imported files.'], 422)
+                : back()->withErrors(['admin' => 'This admin cannot be deleted because they own imported files.']);
+        }
+
+        AuditLog::record($request, 'admin.deleted', 'Deleted admin '.$admin->name.'.', 'user', $admin->id, null, $admin->only(['name', 'email', 'role']));
+        $admin->delete();
+        $redirect = route('admin.admins.index');
+
+        return $request->expectsJson()
+            ? response()->json(['redirect' => $redirect, 'message' => 'Admin account deleted.'])
+            : redirect($redirect)->with('status', 'Admin account deleted.');
     }
 
     public function updateLocations(Request $request, User $manager): RedirectResponse|JsonResponse

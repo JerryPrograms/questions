@@ -53,17 +53,4 @@
         </form>
     </section>
 
-    @can('super-admin')
-        <div class="section-heading assignment-summary-heading"><div><span class="eyebrow">ADMINISTRATION</span><h2>Create admin</h2></div></div>
-        <section class="panel create-panel manager-create-panel"><div class="panel-heading"><div><h3>New admin</h3></div></div><p class="panel-description">Admins can manage managers and access every location.</p>
-            <form method="POST" action="{{ route('admin.admins.store') }}" class="form-stack" data-ajax>@csrf
-                <div class="field"><label for="admin_name">Full name</label><input id="admin_name" name="name" type="text" autocomplete="name" required><span class="field-error" data-error-for="name" role="alert"></span></div>
-                <div class="field"><label for="admin_email">Email address</label><input id="admin_email" name="email" type="email" autocomplete="off" required><span class="field-error" data-error-for="email" role="alert"></span></div>
-                <div class="field"><label for="admin_password">Password</label><input id="admin_password" name="password" type="password" autocomplete="new-password" minlength="12" required><span class="field-error" data-error-for="password" role="alert"></span></div>
-                <div class="field"><label for="admin_password_confirmation">Confirm password</label><input id="admin_password_confirmation" name="password_confirmation" type="password" autocomplete="new-password" minlength="12" required></div>
-                <span class="form-error" data-form-error role="alert"></span>
-                <button class="button button-primary" type="submit">Create admin <span aria-hidden="true">→</span></button>
-            </form>
-        </section>
-    @endcan
 @endsection
