@@ -139,6 +139,12 @@ p { text-wrap: pretty; }
 .option-management-grid { display: grid; grid-template-columns: minmax(380px, .8fr) minmax(0, 1.2fr); gap: 22px; align-items: start; }
 .single-option-form { padding: 18px 22px 22px; }
 .option-upload-panel .location-options { max-height: 210px; }
+.option-upload-panel .select2-container { width: 100% !important; }
+.option-upload-panel .select2-container--default .select2-selection--single { min-height: 40px; border-color: #dfe5ec; border-radius: 6px; background: #fbfcfe; }
+.option-upload-panel .select2-container--default .select2-selection--single .select2-selection__rendered { padding: 5px 30px 5px 12px; color: var(--workspace-ink); font-size: 12px; line-height: 28px; }
+.option-upload-panel .select2-container--default .select2-selection--single .select2-selection__arrow { height: 38px; }
+.option-upload-panel .select2-container--default.select2-container--focus .select2-selection--single, .option-upload-panel .select2-container--default.select2-container--open .select2-selection--single { border-color: var(--workspace-blue); background: #fff; box-shadow: 0 0 0 3px rgba(66, 133, 244, .13); }
+.option-upload-panel select[aria-invalid=true] + .select2 .select2-selection--single { border-color: var(--workspace-danger); }
 .option-coverage-panel { overflow: hidden; }
 .option-location { border-bottom: 1px solid var(--workspace-border); }
 .option-location:last-child { border-bottom: 0; }
@@ -160,14 +166,17 @@ p { text-wrap: pretty; }
 .option-delete-button { border-color: #f1c9cf; background: var(--workspace-surface); color: var(--workspace-danger); }
 .option-delete-button:hover { border-color: #eda6b0; background: #fff0f2; color: #a93441; }
 .option-values p { margin: 0; color: var(--workspace-muted); font-size: 10px; }
-.admin-management-grid { display: grid; grid-template-columns: minmax(300px, .7fr) minmax(0, 1.3fr); gap: 22px; align-items: start; }
-.admin-account-list { display: grid; gap: 12px; padding: 18px 22px 22px; }
-.admin-account-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: end; padding: 16px; border: 1px solid var(--workspace-border); border-radius: 8px; background: #fbfcfe; }
-.admin-edit-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.admin-edit-form .admin-password-fields, .admin-edit-form .admin-actions, .admin-edit-form .field-error, .admin-edit-form .form-error { grid-column: 1 / -1; }
-.admin-password-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.admin-actions { display: flex; justify-content: flex-end; }
-.admin-delete-form { padding-bottom: 2px; }
+.admin-management-grid { display: grid; gap: 22px; }
+.admin-create-panel { max-width: 760px; }
+.admin-table { min-width: 980px; }
+.admin-table-header, .admin-table-row { display: grid; grid-template-columns: 1.05fr 1.35fr 1fr 1fr auto; gap: 10px; align-items: start; padding: 10px 16px; }
+.admin-table-header { background: #f5f8fb; color: #66768e; font-size: 9px; font-weight: 750; letter-spacing: .07em; text-transform: uppercase; }
+.admin-table-row { border-top: 1px solid var(--workspace-border); }
+.admin-table-row:hover { background: #eef5ff; }
+.admin-table-row .field input { height: 40px; }
+.admin-table-actions { display: flex; gap: 6px; }
+.admin-table-row > .form-error { grid-column: 1 / -1; }
+.admin-delete-form .form-error { margin: 0 16px 10px; }
 .action-panel { padding: 22px; }
 .action-panel h3 { margin: 0 0 9px; }
 .action-panel p { color: var(--workspace-muted); font-size: 12px; line-height: 1.5; }
@@ -277,13 +286,14 @@ table[data-server-table="dashboard-locations"] th, table[data-server-table="dash
 .question-option-picker .select2-container--default .select2-selection--single .select2-selection__arrow { height: 38px; }
 .question-option-picker [data-question-option-status] { color: var(--workspace-muted); font-size: 9px; line-height: 1.35; }
 .question-option-picker [data-question-option-status]:empty { display: none; }
-.answer-form { display: grid; width: 100%; min-width: 360px; gap: 4px; }
+.answer-form { display: grid; width: 100%; min-width: 520px; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 6px; align-items: start; }
 .answer-form textarea { min-width: 0; min-height: 40px; padding: 7px 9px; overflow: hidden; font-size: 10px; line-height: 1.3; resize: none; }
 .answer-entry { display: grid; width: 100%; gap: 3px 5px; }
 .answer-description { grid-column: 1; margin: 0; overflow: hidden; color: var(--workspace-secondary); font-size: 9px; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
 .answer-description strong { margin-right: 2px; }
 .answer-description-icon { display: inline-flex; align-items: center; justify-content: center; width: 12px; height: 12px; margin-right: 3px; border: 1px solid currentColor; border-radius: 50%; font-size: 8px; font-style: normal; font-weight: 800; }
-.answer-form-actions { display: flex; justify-content: flex-end; gap: 6px; }
+.answer-form-actions { display: flex; gap: 6px; }
+.answer-form > .form-error { grid-column: 1 / -1; }
 .answer-history-action { width: 44px; min-height: 40px; padding: 0; border-color: #d9e2ec; background: #fff; color: var(--workspace-blue); }
 .answer-history-action:hover { background: #edf5ff; }
 .answer-history-action svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
@@ -410,7 +420,7 @@ table[data-server-table="dashboard-locations"] th, table[data-server-table="dash
     .grid-two { grid-template-columns: 1fr; }
     .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .question-toolbar { align-items: flex-start; flex-direction: column; }
-    .option-management-grid, .admin-management-grid { grid-template-columns: 1fr; }
+    .option-management-grid { grid-template-columns: 1fr; }
     .option-value-columns { grid-template-columns: 1fr; }
     .audit-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .audit-search { grid-column: span 2; }
@@ -437,8 +447,6 @@ table[data-server-table="dashboard-locations"] th, table[data-server-table="dash
     .audit-filters { grid-template-columns: 1fr; padding: 16px; }
     .audit-search { grid-column: auto; }
     .audit-pagination { align-items: flex-start; flex-direction: column; }
-    .admin-account-card, .admin-edit-form, .admin-password-fields { grid-template-columns: 1fr; }
-    .admin-delete-form .button { width: 100%; }
 }
 
 @media (prefers-reduced-motion: reduce) {

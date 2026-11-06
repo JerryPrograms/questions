@@ -12,7 +12,7 @@
             <div class="panel-heading"><h3 id="option-management-heading">Create one choice</h3><span class="panel-note">Account / payee</span></div>
             <form method="POST" action="{{ route('admin.question-options.single') }}" class="form-stack single-option-form" data-ajax>
                 @csrf
-                <div class="field"><label for="single-option-location">Location</label><select id="single-option-location" name="location" required><option value="">Select a location</option>@foreach($locations as $location)<option value="{{ $location }}">{{ $location }}</option>@endforeach</select><span class="field-error" data-error-for="location" role="alert"></span></div>
+                <div class="field"><label for="single-option-location">Location</label><select id="single-option-location" name="location" required data-location-select2><option value="">Select a location</option>@foreach($locations as $location)<option value="{{ $location }}">{{ $location }}</option>@endforeach</select><span class="field-error" data-error-for="location" role="alert"></span></div>
                 <div class="field"><label for="single-option-type">Choice type</label><select id="single-option-type" name="type" required><option value="account">Account</option><option value="paid_to_by">Paid to/by</option></select><span class="field-error" data-error-for="type" role="alert"></span></div>
                 <div class="field"><label for="single-option-value">Name</label><input id="single-option-value" name="value" maxlength="255" required><span class="field-error" data-error-for="value" role="alert"></span></div>
                 <span class="form-error" data-form-error role="alert"></span>

@@ -17,6 +17,14 @@ $('[data-audit-filter-select]').each(function () {
         width: '100%',
     });
 });
+$('[data-location-select2]').each(function () {
+    $(this).select2({
+        allowClear: true,
+        minimumResultsForSearch: 0,
+        placeholder: this.options[0]?.text,
+        width: '100%',
+    });
+});
 const confirmFormSubmit = (message, title = 'Delete option', confirmLabel = 'Delete') => new Promise((resolve) => {
     $.confirm({
         title,
