@@ -917,7 +917,7 @@ document.querySelectorAll('[data-server-table]').forEach((table) => {
             try {
                 const formData = new FormData(form);
                 formData.set('action', action);
-                const response = await fetch(form.action, {
+                const response = await fetch(form.getAttribute('action'), {
                     method: 'POST',
                     body: formData,
                     headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
