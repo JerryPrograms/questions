@@ -261,7 +261,7 @@ document.querySelectorAll('[data-server-table]').forEach((table) => {
                         return answer ?? '';
                     }
 
-                    const answers = row.answers.length === 0 && answer !== null
+                    const answers = row.answers.length === 0 && answer !== null && row.answered_at !== null
                         ? [{ answer, answered_by_name: row.answered_by_name, answered_at: row.answered_at }]
                         : row.answers;
                     const description = row.description === null ? '' : `<p class="answer-description" title="${textRenderer.display(row.description)}"><span class="answer-description-icon" aria-hidden="true">i</span><strong>Memo/Description:</strong> ${textRenderer.display(row.description)}</p>`;
@@ -272,11 +272,14 @@ document.querySelectorAll('[data-server-table]').forEach((table) => {
                     }
 
                     const action = table.dataset.answerUrl.replace('__id__', encodeURIComponent(row.id));
-                    const label = answer === null ? 'Save answer' : 'Add answer';
+                    const label = row.answered_at === null ? 'Save' : 'Add answer';
                     const latestAnswer = answers[0]?.answer ?? answer ?? '';
-                    const answerValue = row.answered_at === null ? '' : textRenderer.display(latestAnswer);
+                    const answerValue = textRenderer.display(row.answered_at === null ? (answer ?? '') : latestAnswer);
+                    const markAnsweredButton = row.answered_at === null
+                        ? '<button class="button button-primary" type="submit" name="action" value="answer">Mark as answered</button>'
+                        : '';
 
-                    return `<form method="POST" action="${action}" class="answer-form" data-answer-form><input type="hidden" name="_token" value="${table.dataset.csrf}"><label class="sr-only" for="answer-${Number(row.id)}">Add answer</label><div class="answer-entry"><textarea id="answer-${Number(row.id)}" name="answer" data-original-value="${answerValue}" data-answer-textarea rows="1" maxlength="10000" autocomplete="off" required>${answerValue}</textarea><button class="button button-primary answer-save-button" type="submit" aria-label="${label}" title="${label}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h12l2 2v16H5zM8 3v6h8V3M8 21v-8h8v8"/></svg></button>${description}</div><span class="form-error" data-form-error role="alert"></span></form>`;
+                    return `<form method="POST" action="${action}" class="answer-form" data-answer-form><input type="hidden" name="_token" value="${table.dataset.csrf}"><label class="sr-only" for="answer-${Number(row.id)}">${label}</label><div class="answer-entry"><textarea id="answer-${Number(row.id)}" name="answer" data-original-value="${answerValue}" data-answer-textarea rows="1" maxlength="10000" autocomplete="off" required>${answerValue}</textarea>${description}</div><div class="answer-form-actions"><button class="button" type="submit" name="action" value="save">${label}</button>${markAnsweredButton}</div><span class="form-error" data-form-error role="alert"></span></form>`;
                 },
             },
             {
@@ -284,7 +287,7 @@ document.querySelectorAll('[data-server-table]').forEach((table) => {
                 orderable: false,
                 searchable: false,
                 render: (id, type, row) => {
-                    const answers = row.answers.length === 0 && row.answer !== null
+                    const answers = row.answers.length === 0 && row.answer !== null && row.answered_at !== null
                         ? [{ answer: row.answer, answered_by_name: row.answered_by_name, answered_at: row.answered_at }]
                         : row.answers;
                     answerHistories.set(Number(id), { answers, location: row.location, description: row.description });
@@ -900,20 +903,23 @@ document.querySelectorAll('[data-server-table]').forEach((table) => {
             }
 
             event.preventDefault();
-            const button = form.querySelector('button[type="submit"]');
+            const action = event.submitter?.value ?? 'save';
+            const buttons = form.querySelectorAll('button[type="submit"]');
             const error = form.querySelector('[data-form-error]');
 
-            if (form.elements.answer.value === form.elements.answer.dataset.originalValue) {
+            if (action === 'save' && form.elements.answer.value === form.elements.answer.dataset.originalValue) {
                 return;
             }
 
-            button.disabled = true;
+            buttons.forEach((button) => { button.disabled = true; });
             error.textContent = '';
 
             try {
+                const formData = new FormData(form);
+                formData.set('action', action);
                 const response = await fetch(form.action, {
                     method: 'POST',
-                    body: new FormData(form),
+                    body: formData,
                     headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     credentials: 'same-origin',
                 });
@@ -929,7 +935,7 @@ document.querySelectorAll('[data-server-table]').forEach((table) => {
             } catch {
                 error.textContent = 'Unable to connect. Please try again.';
             } finally {
-                button.disabled = false;
+                buttons.forEach((button) => { button.disabled = false; });
             }
         });
     }

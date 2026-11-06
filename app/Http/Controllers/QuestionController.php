@@ -125,7 +125,9 @@ class QuestionController extends Controller
     {
         $data = $request->validate([
             'answer' => ['required', 'string', 'max:10000'],
+            'action' => ['sometimes', 'in:save,answer'],
         ]);
+        $action = $data['action'] ?? 'save';
         $location = DB::transaction(function () use ($entry, $data, $request): string {
             $question = DB::table('accounting_entries')->where('id', $entry)->lockForUpdate()->first();
             abort_if($question === null, 404);
@@ -135,12 +137,16 @@ class QuestionController extends Controller
                 throw ValidationException::withMessages(['answer' => 'Archived questions cannot be changed.']);
             }
 
-            $this->saveAnswer($question, $request, $data['answer']);
+            if (($data['action'] ?? 'save') === 'answer') {
+                $this->markAsAnswered($question, $request, $data['answer']);
+            } else {
+                $this->saveAnswerOnly($question, $request, $data['answer']);
+            }
 
             return $question->location;
         });
 
-        $message = 'Answer saved.';
+        $message = $action === 'answer' ? 'Question marked as answered.' : 'Answer saved.';
 
         return $request->expectsJson()
             ? response()->json(['message' => $message])
@@ -451,6 +457,45 @@ class QuestionController extends Controller
         }
 
         return $answer;
+    }
+
+    private function saveAnswerOnly(object $question, Request $request, string $answer): void
+    {
+        if ($question->answered_at !== null) {
+            $this->saveAnswer($question, $request, $answer);
+
+            return;
+        }
+
+        $answer = preg_replace('/\R+/', "\n", $answer) ?? $answer;
+        DB::table('accounting_entries')->where('id', $question->id)->update([
+            'answer' => $answer,
+            'answer_exported_at' => null,
+            'updated_at' => now(),
+        ]);
+        AuditLog::record($request, 'question.answer_saved', 'Saved an answer for question #'.$question->id.'.', 'question', $question->id, $question->location, ['answer' => $question->answer], ['answer' => $answer]);
+    }
+
+    private function markAsAnswered(object $question, Request $request, string $answer): void
+    {
+        $answer = preg_replace('/\R+/', "\n", $answer) ?? $answer;
+        $answeredAt = now();
+        $userId = $request->user()->id;
+
+        DB::table('accounting_entries')->where('id', $question->id)->update([
+            'answer' => $answer,
+            'answered_by' => $userId,
+            'answered_at' => $answeredAt,
+            'answer_exported_at' => null,
+            'updated_at' => $answeredAt,
+        ]);
+        DB::table('accounting_entry_answers')->insert([
+            'accounting_entry_id' => $question->id,
+            'answer' => $answer,
+            'answered_by' => $userId,
+            'answered_at' => $answeredAt,
+        ]);
+        AuditLog::record($request, 'question.answered', 'Marked question #'.$question->id.' as answered.', 'question', $question->id, $question->location, null, ['answer' => $answer]);
     }
 
     private function saveAnswer(object $question, Request $request, string $answer): void

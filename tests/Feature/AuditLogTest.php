@@ -28,7 +28,7 @@ class AuditLogTest extends TestCase
         ])->assertRedirect();
         $entryId = DB::table('accounting_entries')->value('id');
 
-        $this->postJson(route('admin.questions.answer', $entryId), ['answer' => 'Approved after receipt review.'])
+        $this->postJson(route('admin.questions.answer', $entryId), ['answer' => 'Approved after receipt review.', 'action' => 'answer'])
             ->assertOk();
 
         $this->assertDatabaseHas('audit_logs', [
@@ -96,7 +96,7 @@ class AuditLogTest extends TestCase
             'file' => UploadedFile::fake()->createWithContent('transactions.csv', $transactions),
         ]);
         $entryId = DB::table('accounting_entries')->value('id');
-        $this->postJson(route('admin.questions.answer', $entryId), ['answer' => 'Historical answer.'])->assertOk();
+        $this->postJson(route('admin.questions.answer', $entryId), ['answer' => 'Historical answer.', 'action' => 'answer'])->assertOk();
 
         Schema::drop('audit_logs');
         $migration = require database_path('migrations/2026_11_02_215734_create_audit_logs_table.php');

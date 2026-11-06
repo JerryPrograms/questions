@@ -148,12 +148,21 @@ class PortalAccessTest extends TestCase
         $this->postJson(route('admin.questions.answer', $entryId), ['answer' => 'Approved for payment.'])
             ->assertOk()
             ->assertJsonPath('message', 'Answer saved.');
-        $this->postJson(route('admin.questions.answer', $entryId), ['answer' => 'Follow-up note.'])
-            ->assertOk()
-            ->assertJsonPath('message', 'Answer saved.');
         $this->assertDatabaseHas('accounting_entries', [
             'id' => $entryId,
-            'answer' => "Approved for payment.\nFollow-up note.",
+            'answer' => 'Approved for payment.',
+            'answered_by' => null,
+            'answered_at' => null,
+        ]);
+        $this->postJson(route('admin.questions.answer', $entryId), [
+            'answer' => 'Approved for payment.',
+            'action' => 'answer',
+        ])
+            ->assertOk()
+            ->assertJsonPath('message', 'Question marked as answered.');
+        $this->assertDatabaseHas('accounting_entries', [
+            'id' => $entryId,
+            'answer' => 'Approved for payment.',
             'answered_by' => $admin->id,
             'account' => 'Office Supplies',
             'paid_to_by' => 'Preferred Supplier',
@@ -176,15 +185,12 @@ class PortalAccessTest extends TestCase
         $answeredQuestions = $this->getJson(route('admin.questions.data', ['location' => 'Main Store']).'&'.$questionTableParameters.'&status=answered')
             ->assertOk()
             ->assertJsonPath('recordsFiltered', 1)
-            ->assertJsonPath('data.0.answer', "Approved for payment.\nFollow-up note.")
+            ->assertJsonPath('data.0.answer', 'Approved for payment.')
             ->assertJsonPath('data.0.answered_by_name', $admin->name)
-            ->assertJsonPath('data.0.answers.0.answer', 'Follow-up note.')
-            ->assertJsonPath('data.0.answers.0.answered_by_name', $admin->name)
-            ->assertJsonPath('data.0.answers.1.answer', 'Approved for payment.')
-            ->assertJsonPath('data.0.answers.1.answered_by_name', $admin->name);
+            ->assertJsonPath('data.0.answers.0.answer', 'Approved for payment.')
+            ->assertJsonPath('data.0.answers.0.answered_by_name', $admin->name);
         $this->assertNotNull($answeredQuestions->json('data.0.answered_at'));
         $this->assertNotNull($answeredQuestions->json('data.0.answers.0.answered_at'));
-        $this->assertNotNull($answeredQuestions->json('data.0.answers.1.answered_at'));
         $this->get(route('admin.manager-locations.index'))
             ->assertOk()
             ->assertSee($manager->name)
@@ -242,7 +248,7 @@ class PortalAccessTest extends TestCase
             ->assertOk()->assertJsonPath('message', 'Answer saved.');
         $this->assertDatabaseHas('accounting_entries', [
             'id' => $entryId,
-            'answer' => "Approved for payment.\nFollow-up note.\nManager follow-up",
+            'answer' => "Approved for payment.\nManager follow-up",
             'answered_by' => $manager->id,
         ]);
         $this->assertDatabaseHas('accounting_entry_answers', [
